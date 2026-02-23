@@ -1,0 +1,35 @@
+repos:
+  # Basic auto-fixes (zero friction)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+
+  # Ruff: lint + format with auto-fix (Rust-backed, fast)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.3
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # Type checking with ty (Rust-backed, fast)
+  - repo: local
+    hooks:
+      - id: ty-check
+        name: ty type check
+        entry: uv run ty check
+        language: system
+        pass_filenames: false
+        types: [python]
+
+  # Secrets detection on push (fast, lightweight)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        stages: [pre-push]
+
+# Note: Semgrep runs in CI only (too slow for local dev, false positives)

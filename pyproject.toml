@@ -1,0 +1,128 @@
+[build-system]
+requires = ["hatchling>=1.24", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "e-template-agents"
+dynamic = ["version"]
+description = "Template for building multi-agent voice AI systems with LiveKit and double-loop architecture"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Eager", email = "dev@eager.dev" }]
+keywords = ["livekit", "ai", "voice", "agents", "stt", "tts", "pydantic", "template", "multi-agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.10.0",
+    "orjson>=3.10.0",
+    "structlog>=25.0.0",
+    "beartype>=0.21.0",
+    "gitpython>=3.1.45",
+    "httpx>=0.28.1",
+    "numpy>=2.0.0",
+    "scipy>=1.16.3",
+    "ten-vad",
+    "ovld>=0.5.13",
+    "livekit-agents[google,silero]~=1.3",
+    "python-dotenv>=1.2.1",
+    "wyoming>=1.8.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "typer>=0.16.0",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+e-template-agents = "e_template_agents.__main__:main"
+cli = "e_template_agents.cli:cli"
+
+[project.urls]
+Documentation = "https://github.com/eagerworks/e-template-agents#readme"
+Repository = "https://github.com/eagerworks/e-template-agents"
+Issues = "https://github.com/eagerworks/e-template-agents/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.0.0",
+    "pytest-dotenv>=0.5.2",
+    "python-dotenv>=1.1.0",
+    "ruff>=0.14.0",
+    "pre-commit>=4.4.0",
+    "ty>=0.0.5",
+    "respx>=0.22.0",
+]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/e_template_agents"]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+bump = true
+
+[tool.hatch.envs.default]
+installer = "uv"
+
+[tool.hatch.envs.default.scripts]
+run = "python -m e_template_agents"
+console = "python -m e_template_agents console"
+lint = "ruff check --fix ."
+format = "ruff format ."
+typecheck = "ty typecheck"
+test = "python -m pytest tests/unit -v"
+test-integration = "python -m pytest tests/integration -v"
+
+[tool.pytest.ini_options]
+env_files = [".env"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+addopts = "-m 'not slow'"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/e_template_agents/operations/audio.py" = ["F811"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["e_template_agents"]
+
+[tool.ty.environment]
+python-version = "3.12"
+root = ["./src/e_template_agents"]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+unresolved-import = "error"
+invalid-overload = "ignore"
+useless-overload-body = "ignore"
+
+[tool.uv.sources]
+ten-vad = { git = "https://github.com/TEN-framework/ten-vad.git" }

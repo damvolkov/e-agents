@@ -1,0 +1,155 @@
+services:
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis
+    hostname: redis
+    env_file: .env
+    command: redis-stack-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6380:6379"
+      - "8002:8001"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: always
+    networks:
+      - agents
+
+  livekit:
+    image: livekit/livekit-server:v1.9
+    container_name: livekit
+    hostname: livekit
+    env_file: .env
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"
+      - "7881:7881/udp"
+      - "60000-60050:60000-60050/udp"
+    volumes:
+      - ./docker/livekit/livekit.yaml:/etc/livekit.yaml
+    environment:
+      - REDIS_ADDRESS=redis:6379
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - agents
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  sip:
+    image: livekit/sip:latest
+    container_name: sip
+    hostname: sip
+    network_mode: host
+    env_file: .env
+    environment:
+      SIP_CONFIG_BODY: |
+        log_level: debug
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ${LIVEKIT_WS_URL}
+        redis:
+          address: localhost:6379
+          password: ${REDIS_PASSWORD}
+        sip_port: 5060
+        rtp_port: 10000-20000
+        use_external_ip: true
+    restart: unless-stopped
+    depends_on:
+      livekit:
+        condition: service_started
+
+  stt:
+    image: fedirz/faster-whisper-server:latest-cuda
+    container_name: stt
+    hostname: stt
+    ports:
+      - "4100:8000"
+    volumes:
+      - ./data/stt/models:/root/.cache/huggingface
+    environment:
+      - WHISPER__INFERENCE_DEVICE=auto
+      - WHISPER__MODEL=Systran/faster-whisper-small
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: always
+    networks:
+      - agents
+
+  tts:
+    image: lscr.io/linuxserver/piper:latest
+    container_name: tts
+    hostname: tts
+    env_file: .env
+    ports:
+      - "10200:10200"
+    volumes:
+      - ./data/tts/piper:/config
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10200"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    networks:
+      - agents
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api
+    hostname: api
+    env_file: .env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./src:/app/src
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_WS_URL=ws://livekit:7880
+      - REDIS_ADDRESS=redis:6379
+      - STT_BASE_URL=http://stt:8000
+      - STT_WS_URL=ws://stt:8000/v1/audio/transcriptions
+      - TTS_HOST=tts
+    command: uvicorn e_template_agents.__main__:create_api_app --factory --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - agents
+    depends_on:
+      livekit:
+        condition: service_healthy
+
+networks:
+  agents:
+    driver: bridge
