@@ -6,8 +6,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from e_template_agents.tasks.models import BackgroundTask, TaskNotification
-from e_template_agents.tasks.status import TaskStatus
+from e_agents.tasks.models import BackgroundTask, TaskNotification
+from e_agents.tasks.status import TaskStatus
 
 
 @dataclass

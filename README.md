@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="main.png" alt="e-template-agents" width="128">
-  <h1>e-template-agents</h1>
+  <img src="main.png" alt="e-agents" width="128">
+  <h1>e-agents</h1>
   <p><strong>Template for building multi-agent voice AI systems with LiveKit</strong></p>
   <p>Double-loop architecture with background tasks, agent handoffs, and real-time tracing.</p>
   <p>
-    <a href="https://github.com/eagerworks/e-template-agents"><img src="https://img.shields.io/github/stars/eagerworks/e-template-agents?style=social" alt="GitHub"></a>
+    <a href="https://github.com/eagerworks/e-agents"><img src="https://img.shields.io/github/stars/eagerworks/e-agents?style=social" alt="GitHub"></a>
     <img src="https://img.shields.io/badge/python-3.12+-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
@@ -19,8 +19,8 @@ Built on [LiveKit Agents](https://docs.livekit.io/agents/) with self-hosted STT/
 1. Clone and install
 
 ```bash
-git clone https://github.com/eagerworks/e-template-agents.git
-cd e-template-agents
+git clone https://github.com/eagerworks/e-agents.git
+cd e-agents
 make install
 ```
 
@@ -139,7 +139,7 @@ GEMINI_MODEL=gemini-2.0-flash
 ## Project Structure
 
 ```
-src/e_template_agents/
+src/e_agents/
 ├── agents/              # Agent definitions + config.yaml
 │   ├── navigator.py     # Outer-loop dispatcher
 │   ├── web_searcher.py  # Web search specialist

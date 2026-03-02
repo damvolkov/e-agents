@@ -8,7 +8,7 @@ All agents inherit from `livekit.agents.Agent` and accept an `AgentConfig` for t
 
 ```python
 from livekit.agents import Agent, RunContext, function_tool
-from e_template_agents.models.agent import AgentConfig
+from e_agents.models.agent import AgentConfig
 
 class MyAgent(Agent):
     def __init__(self, config: AgentConfig) -> None:

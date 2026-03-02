@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from livekit import api
 
-from e_template_agents.core.settings import settings as st
+from e_agents.core.settings import settings as st
 
 
 @asynccontextmanager

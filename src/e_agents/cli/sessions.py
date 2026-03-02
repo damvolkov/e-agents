@@ -6,9 +6,9 @@ from typing import Literal
 import typer
 from livekit import agents
 
-from e_template_agents.core.logger import LogIcon, logger
-from e_template_agents.core.settings import settings as st
-from e_template_agents.sessions.double_loop import DoubleLoopSession
+from e_agents.core.logger import LogIcon, logger
+from e_agents.core.settings import settings as st
+from e_agents.sessions.double_loop import DoubleLoopSession
 
 app = typer.Typer(help="Agent session management")
 

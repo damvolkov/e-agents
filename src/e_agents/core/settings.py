@@ -1,4 +1,4 @@
-"""Unified settings for e_template_agents."""
+"""Unified settings for e_agents."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
-    from e_template_agents.models.agent import AgentsConfig
+    from e_agents.models.agent import AgentsConfig
 
 
 def read_pyproject(pyproject_path: Path) -> dict:
@@ -21,7 +21,7 @@ def read_pyproject(pyproject_path: Path) -> dict:
 
 def load_agents_config(config_path: Path) -> AgentsConfig:
     """Load agents configuration from YAML file."""
-    from e_template_agents.models.agent import AgentsConfig
+    from e_agents.models.agent import AgentsConfig
 
     return AgentsConfig.from_yaml(config_path)
 
@@ -38,27 +38,27 @@ def get_version(base_dir: Path) -> str:
         try:
             import importlib.metadata
 
-            return importlib.metadata.version("e_template_agents")
+            return importlib.metadata.version("e_agents")
         except Exception:
             return "0.0.0"
 
 
 class Settings(BaseSettings):
-    """Unified settings for e_template_agents service."""
+    """Unified settings for e_agents service."""
 
     ENVIRONMENT: Literal["DEV", "PROD"] = "DEV"
 
     # ClassVar to prevent Pydantic from trying to load from env
     BASE_DIR: ClassVar[Path] = Path(__file__).parent.parent.parent.parent
     PROJECT: ClassVar[dict] = read_pyproject(BASE_DIR / "pyproject.toml")
-    API_NAME: ClassVar[str] = PROJECT.get("project", {}).get("name", "e_template_agents")
-    API_DESCRIPTION: ClassVar[str] = PROJECT.get("project", {}).get("description", "e-template-agents")
+    API_NAME: ClassVar[str] = PROJECT.get("project", {}).get("name", "e_agents")
+    API_DESCRIPTION: ClassVar[str] = PROJECT.get("project", {}).get("description", "e-agents")
     API_VERSION: ClassVar[str] = get_version(BASE_DIR)
 
     # Paths
     DATA_PATH: ClassVar[Path] = BASE_DIR / "data"
     MODELS_PATH: ClassVar[Path] = DATA_PATH / "models"
-    AGENTS_CONFIG_PATH: ClassVar[Path] = BASE_DIR / "src" / "e_template_agents" / "agents" / "config.yaml"
+    AGENTS_CONFIG_PATH: ClassVar[Path] = BASE_DIR / "src" / "e_agents" / "agents" / "config.yaml"
 
     # Redis
     REDIS_PASSWORD: str = ""

@@ -5,7 +5,7 @@ from livekit.agents import stt
 from livekit.agents.types import NOT_GIVEN, APIConnectOptions, NotGivenOr
 from livekit.agents.utils import AudioBuffer
 
-from e_template_agents.core.settings import settings as st
+from e_agents.core.settings import settings as st
 
 
 class WhisperSTT(stt.STT):

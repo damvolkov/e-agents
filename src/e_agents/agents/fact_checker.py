@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 from livekit.agents import Agent, RunContext, function_tool
 
-from e_template_agents.tasks.status import TaskPriority, TaskStatus
+from e_agents.tasks.status import TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
-    from e_template_agents.models.agent import AgentConfig
-    from e_template_agents.sessions.double_loop import DoubleLoopUserData
-    from e_template_agents.tasks.executor import TaskExecutor
+    from e_agents.models.agent import AgentConfig
+    from e_agents.sessions.double_loop import DoubleLoopUserData
+    from e_agents.tasks.executor import TaskExecutor
 
 
 class FactCheckerAgent(Agent):
@@ -60,9 +60,17 @@ class FactCheckerAgent(Agent):
                 "verdict": "partially_verified",
                 "confidence": 0.78,
                 "evidence": [
-                    {"source": "Academic literature", "supports": True, "note": "Consistent with peer-reviewed findings"},
+                    {
+                        "source": "Academic literature",
+                        "supports": True,
+                        "note": "Consistent with peer-reviewed findings",
+                    },
                     {"source": "Official statistics", "supports": True, "note": "Aligns with published data"},
-                    {"source": "Expert consensus", "supports": False, "note": "Some experts express nuanced disagreement"},
+                    {
+                        "source": "Expert consensus",
+                        "supports": False,
+                        "note": "Some experts express nuanced disagreement",
+                    },
                 ],
                 "nuance": "The core claim holds but context matters significantly.",
             }
@@ -93,7 +101,11 @@ class FactCheckerAgent(Agent):
                 "sources_checked": sources,
                 "agreement_ratio": 0.85,
                 "findings": [
-                    {"source": src, "agrees": idx % 3 != 2, "detail": f"Source {src} {'supports' if idx % 3 != 2 else 'partially contradicts'} the claim"}
+                    {
+                        "source": src,
+                        "agrees": idx % 3 != 2,
+                        "detail": f"Source {src} {'supports' if idx % 3 != 2 else 'partially contradicts'} the claim",
+                    }
                     for idx, src in enumerate(sources)
                 ],
                 "overall_assessment": "Mostly corroborated with minor caveats.",
@@ -129,7 +141,9 @@ class FactCheckerAgent(Agent):
         """Return to the main conversation flow."""
         agents: dict[str, Agent] = context.userdata.agents
         registry = self._userdata.task_registry
-        completed = [t for t in registry.tasks.values() if t.initiated_by == self.id and t.status == TaskStatus.COMPLETED]
+        completed = [
+            t for t in registry.tasks.values() if t.initiated_by == self.id and t.status == TaskStatus.COMPLETED
+        ]
 
         msg = "Returning to main conversation."
         if completed:

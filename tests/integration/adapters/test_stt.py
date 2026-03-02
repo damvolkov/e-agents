@@ -5,7 +5,7 @@ import respx
 from httpx import Response
 from livekit import rtc
 
-from e_template_agents.adapters.stt import WhisperSTT
+from e_agents.adapters.stt import WhisperSTT
 
 
 @pytest.mark.slow

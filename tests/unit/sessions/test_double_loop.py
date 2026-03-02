@@ -4,9 +4,9 @@ import asyncio
 
 import pytest
 
-from e_template_agents.tasks.models import BackgroundTask, TaskNotification
-from e_template_agents.tasks.registry import TaskRegistry
-from e_template_agents.tasks.status import TaskPriority, TaskStatus
+from e_agents.tasks.models import BackgroundTask, TaskNotification
+from e_agents.tasks.registry import TaskRegistry
+from e_agents.tasks.status import TaskPriority, TaskStatus
 
 
 @pytest.fixture
@@ -259,6 +259,7 @@ async def test_multiple_agents_multiple_tasks_scenario() -> None:
     nav_notifications = registry.get_pending_notifications(agent_id="navigator_agent")
     assert len(nav_notifications) == 1
     assert nav_notifications[0].task.name == "Web Research"
+    assert nav_notifications[0].task.result is not None
     assert nav_notifications[0].task.result["total"] == 3
 
 

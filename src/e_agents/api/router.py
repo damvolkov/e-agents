@@ -5,9 +5,9 @@ import contextlib
 from fastapi import APIRouter
 from livekit import api
 
-from e_template_agents.api.deps import generate_access_token, get_livekit_api
-from e_template_agents.core.settings import settings as st
-from e_template_agents.models.api import (
+from e_agents.api.deps import generate_access_token, get_livekit_api
+from e_agents.core.settings import settings as st
+from e_agents.models.api import (
     DispatchRequest,
     DispatchResponse,
     RoomRequest,

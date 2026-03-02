@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24", "uv-dynamic-versioning>=0.7.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "e-template-agents"
+name = "e-agents"
 dynamic = ["version"]
 description = "Template for building multi-agent voice AI systems with LiveKit and double-loop architecture"
 readme = "README.md"
@@ -47,13 +47,13 @@ dependencies = [
 ]
 
 [project.scripts]
-e-template-agents = "e_template_agents.__main__:main"
-cli = "e_template_agents.cli:cli"
+e-agents = "e_agents.main:main"
+cli = "e_agents.cli.main:cli"
 
 [project.urls]
-Documentation = "https://github.com/eagerworks/e-template-agents#readme"
-Repository = "https://github.com/eagerworks/e-template-agents"
-Issues = "https://github.com/eagerworks/e-template-agents/issues"
+Documentation = "https://github.com/eagerworks/e-agents#readme"
+Repository = "https://github.com/eagerworks/e-agents"
+Issues = "https://github.com/eagerworks/e-agents/issues"
 
 [dependency-groups]
 dev = [
@@ -71,7 +71,7 @@ dev = [
 source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/e_template_agents"]
+packages = ["src/e_agents"]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"
@@ -82,8 +82,8 @@ bump = true
 installer = "uv"
 
 [tool.hatch.envs.default.scripts]
-run = "python -m e_template_agents"
-console = "python -m e_template_agents console"
+run = "python -m e_agents.main"
+console = "python -m e_agents.main console"
 lint = "ruff check --fix ."
 format = "ruff format ."
 typecheck = "ty typecheck"
@@ -109,14 +109,14 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/e_template_agents/operations/audio.py" = ["F811"]
+"src/e_agents/operations/audio.py" = ["F811"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["e_template_agents"]
+known-first-party = ["e_agents"]
 
 [tool.ty.environment]
 python-version = "3.12"
-root = ["./src/e_template_agents"]
+root = ["./src/e_agents"]
 
 [tool.ty.rules]
 possibly-unresolved-reference = "error"

@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Protocol
 
 from livekit.agents import Agent
 
-from e_template_agents.models.agent import AgentConfig
+from e_agents.models.agent import AgentConfig
 
 if TYPE_CHECKING:
-    from e_template_agents.models.agent import AgentsConfig
+    from e_agents.models.agent import AgentsConfig
 
 
 class ConfigurableAgent(Protocol):

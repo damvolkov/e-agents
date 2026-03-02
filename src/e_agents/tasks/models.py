@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from e_template_agents.tasks.status import TaskPriority, TaskStatus
+from e_agents.tasks.status import TaskPriority, TaskStatus
 
 T = TypeVar("T")
 

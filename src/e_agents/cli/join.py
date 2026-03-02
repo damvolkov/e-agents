@@ -6,9 +6,9 @@ from typing import Annotated
 import typer
 from livekit import rtc
 
-from e_template_agents.api.deps import generate_access_token
-from e_template_agents.core.logger import LogIcon, logger
-from e_template_agents.core.settings import settings as st
+from e_agents.api.deps import generate_access_token
+from e_agents.core.logger import LogIcon, logger
+from e_agents.core.settings import settings as st
 
 app = typer.Typer(help="Join LiveKit rooms as a participant")
 

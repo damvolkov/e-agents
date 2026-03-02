@@ -5,7 +5,7 @@ from datetime import timedelta
 import typer
 from livekit import api
 
-from e_template_agents.core.settings import settings as st
+from e_agents.core.settings import settings as st
 
 app = typer.Typer(help="LiveKit token management")
 

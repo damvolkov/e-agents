@@ -1,11 +1,11 @@
 # =============================================================================
-# e-template-agents Makefile
+# e-agents Makefile
 # =============================================================================
-PROJECT ?= e-template-agents
+PROJECT ?= e-agents
 VERSION ?= latest
 DEBUG ?= true
 ENVIRONMENT ?= DEV
-PACKAGE ?= src/e_template_agents
+PACKAGE ?= src/e_agents
 SESSION ?= double_loop
 
 # OS Detection
@@ -37,7 +37,7 @@ COMPOSE_FILE := compose.yml
 # Help
 # -----------------------------------------------------------------------------
 help:
-	@echo "$(BOLD)$(BLUE)e-template-agents$(RESET) - Multi-agent Voice AI Template"
+	@echo "$(BOLD)$(BLUE)e-agents$(RESET) - Multi-agent Voice AI Template"
 	@echo ""
 	@echo "$(BOLD)Setup:$(RESET)"
 	@echo "  $(GREEN)make install$(RESET)      Install uv, dependencies, and pre-commit hooks"
@@ -155,11 +155,11 @@ logs:
 # -----------------------------------------------------------------------------
 run:
 	@echo "$(GREEN)=== Starting Agent Server (session=$(SESSION)) ===$(RESET)"
-	@uv run python -m e_template_agents run --session $(SESSION)
+	@uv run python -m e_agents.main run --session $(SESSION)
 
 console:
 	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION)) ===$(RESET)"
-	@uv run python -m e_template_agents console --session $(SESSION)
+	@uv run python -m e_agents.main console --session $(SESSION)
 
 # Join variables
 IDENTITY ?= user
@@ -168,10 +168,10 @@ TTL ?= 60
 
 join:
 	@echo "$(GREEN)=== Joining room=$(ROOM) as identity=$(IDENTITY) ===$(RESET)"
-	@uv run python -m e_template_agents join --room $(ROOM) --identity $(IDENTITY) --ttl $(TTL)
+	@uv run python -m e_agents.main join --room $(ROOM) --identity $(IDENTITY) --ttl $(TTL)
 
 token:
-	@uv run python -m e_template_agents token generate --identity $(IDENTITY) --room $(ROOM) --ttl $(TTL)
+	@uv run python -m e_agents.main token generate --identity $(IDENTITY) --room $(ROOM) --ttl $(TTL)
 
 # -----------------------------------------------------------------------------
 # Cleanup

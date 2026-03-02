@@ -1,14 +1,14 @@
-"""CLI commands for e_template_agents."""
+"""CLI commands for e_agents."""
 
 import typer
 
-from e_template_agents.cli.join import app as join_app
-from e_template_agents.cli.sessions import app as sessions_app
-from e_template_agents.cli.sessions import run_session
-from e_template_agents.cli.token import app as token_app
+from e_agents.cli.join import app as join_app
+from e_agents.cli.sessions import app as sessions_app
+from e_agents.cli.sessions import run_session
+from e_agents.cli.token import app as token_app
 
 cli = typer.Typer(
-    name="e_template_agents",
+    name="e_agents",
     help="Multi-agent voice AI system",
     no_args_is_help=True,
 )
