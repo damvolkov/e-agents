@@ -56,7 +56,7 @@ The **Double Loop** architecture separates user-facing conversation (outer loop)
 ### Core Modules
 
 ```
-src/e_template_agents/
+src/e_agents/
 ├── adapters/          # STT/TTS adapters (Whisper, Piper)
 ├── agents/            # Agent definitions with tools
 ├── core/

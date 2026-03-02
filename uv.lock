@@ -417,7 +417,7 @@ wheels = [
 ]
 
 [[package]]
-name = "e-template-agents"
+name = "e-agents"
 source = { editable = "." }
 dependencies = [
     { name = "beartype" },

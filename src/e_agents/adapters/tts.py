@@ -10,7 +10,7 @@ from wyoming.audio import AudioChunk, AudioStop
 from wyoming.client import AsyncTcpClient
 from wyoming.tts import Synthesize
 
-from e_template_agents.core.settings import settings as st
+from e_agents.core.settings import settings as st
 
 
 class PiperChunkedStream(tts.ChunkedStream):

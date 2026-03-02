@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import structlog
 
-from e_template_agents.tasks.models import BackgroundTask, TaskNotification
-from e_template_agents.tasks.registry import TaskRegistry
-from e_template_agents.tasks.status import TaskPriority, TaskStatus
+from e_agents.tasks.models import BackgroundTask, TaskNotification
+from e_agents.tasks.registry import TaskRegistry
+from e_agents.tasks.status import TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
     from livekit.agents import AgentSession

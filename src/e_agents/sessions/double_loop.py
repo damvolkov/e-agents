@@ -17,19 +17,19 @@ from livekit.agents import (
 )
 from livekit.plugins import google, silero
 
-from e_template_agents.adapters.stt import WhisperSTT
-from e_template_agents.adapters.tts import PiperTTS
-from e_template_agents.agents.analyst import AnalystAgent
-from e_template_agents.agents.fact_checker import FactCheckerAgent
-from e_template_agents.agents.navigator import NavigatorAgent
-from e_template_agents.agents.utils import load_agents_from_config
-from e_template_agents.agents.web_searcher import WebSearcherAgent
-from e_template_agents.core.logger import LogIcon, logger
-from e_template_agents.core.settings import settings as st
-from e_template_agents.tasks.executor import TaskExecutor
-from e_template_agents.tasks.models import BackgroundTask
-from e_template_agents.tasks.registry import TaskRegistry
-from e_template_agents.tasks.status import TaskStatus
+from e_agents.adapters.stt import WhisperSTT
+from e_agents.adapters.tts import PiperTTS
+from e_agents.agents.analyst import AnalystAgent
+from e_agents.agents.fact_checker import FactCheckerAgent
+from e_agents.agents.navigator import NavigatorAgent
+from e_agents.agents.utils import load_agents_from_config
+from e_agents.agents.web_searcher import WebSearcherAgent
+from e_agents.core.logger import LogIcon, logger
+from e_agents.core.settings import settings as st
+from e_agents.tasks.executor import TaskExecutor
+from e_agents.tasks.models import BackgroundTask
+from e_agents.tasks.registry import TaskRegistry
+from e_agents.tasks.status import TaskStatus
 
 AGENT_CLASSES = {
     "NavigatorAgent": NavigatorAgent,
@@ -94,7 +94,13 @@ class DoubleLoopSession:
             return
 
         icon = LogIcon.COMPLETE if task.status == TaskStatus.COMPLETED else LogIcon.ERROR
-        logger.info("task_completed: %s [%s] duration=%.2fs", task.name, task.status.value, task.duration_seconds or 0, icon=icon)
+        logger.info(
+            "task_completed: %s [%s] duration=%.2fs",
+            task.name,
+            task.status.value,
+            task.duration_seconds or 0,
+            icon=icon,
+        )
 
         current_agent = self._session.current_agent
 

@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 from livekit.agents import Agent, RunContext, function_tool
 
-from e_template_agents.tasks.status import TaskPriority, TaskStatus
+from e_agents.tasks.status import TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
-    from e_template_agents.models.agent import AgentConfig
-    from e_template_agents.sessions.double_loop import DoubleLoopUserData
-    from e_template_agents.tasks.executor import TaskExecutor
+    from e_agents.models.agent import AgentConfig
+    from e_agents.sessions.double_loop import DoubleLoopUserData
+    from e_agents.tasks.executor import TaskExecutor
 
 
 class NavigatorAgent(Agent):
@@ -48,8 +48,7 @@ class NavigatorAgent(Agent):
             self.session.generate_reply(
                 instructions=(
                     "You have just gathered new information. Present these findings naturally "
-                    "as if you just finished thinking about it. Findings:\n"
-                    + "\n".join(results)
+                    "as if you just finished thinking about it. Findings:\n" + "\n".join(results)
                 )
             )
             return

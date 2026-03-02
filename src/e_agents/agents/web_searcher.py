@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 from livekit.agents import Agent, RunContext, function_tool
 
-from e_template_agents.tasks.status import TaskPriority, TaskStatus
+from e_agents.tasks.status import TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
-    from e_template_agents.models.agent import AgentConfig
-    from e_template_agents.sessions.double_loop import DoubleLoopUserData
-    from e_template_agents.tasks.executor import TaskExecutor
+    from e_agents.models.agent import AgentConfig
+    from e_agents.sessions.double_loop import DoubleLoopUserData
+    from e_agents.tasks.executor import TaskExecutor
 
 
 class WebSearcherAgent(Agent):
@@ -59,9 +59,21 @@ class WebSearcherAgent(Agent):
             return {
                 "query": query,
                 "results": [
-                    {"title": f"Top result for '{query}'", "snippet": f"Comprehensive coverage of {query}...", "relevance": 0.95},
-                    {"title": f"Expert analysis: {query}", "snippet": f"In-depth expert perspective on {query}...", "relevance": 0.87},
-                    {"title": f"Recent developments in {query}", "snippet": f"Latest news and updates about {query}...", "relevance": 0.82},
+                    {
+                        "title": f"Top result for '{query}'",
+                        "snippet": f"Comprehensive coverage of {query}...",
+                        "relevance": 0.95,
+                    },
+                    {
+                        "title": f"Expert analysis: {query}",
+                        "snippet": f"In-depth expert perspective on {query}...",
+                        "relevance": 0.87,
+                    },
+                    {
+                        "title": f"Recent developments in {query}",
+                        "snippet": f"Latest news and updates about {query}...",
+                        "relevance": 0.82,
+                    },
                 ],
                 "total_results": 3,
             }
@@ -124,7 +136,9 @@ class WebSearcherAgent(Agent):
         """Return to the main conversation flow."""
         agents: dict[str, Agent] = context.userdata.agents
         registry = self._userdata.task_registry
-        completed = [t for t in registry.tasks.values() if t.initiated_by == self.id and t.status == TaskStatus.COMPLETED]
+        completed = [
+            t for t in registry.tasks.values() if t.initiated_by == self.id and t.status == TaskStatus.COMPLETED
+        ]
 
         msg = "Returning to main conversation."
         if completed:

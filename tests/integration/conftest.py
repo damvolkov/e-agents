@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from livekit import rtc
 
-from e_template_agents.adapters.stt import WhisperSTT
-from e_template_agents.adapters.tts import PiperTTS
+from e_agents.adapters.stt import WhisperSTT
+from e_agents.adapters.tts import PiperTTS
 
 
 @pytest.fixture

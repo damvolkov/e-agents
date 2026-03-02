@@ -6,7 +6,7 @@ import pytest
 from wyoming.audio import AudioChunk
 from wyoming.event import Event
 
-from e_template_agents.adapters.tts import PiperChunkedStream, PiperTTS
+from e_agents.adapters.tts import PiperChunkedStream, PiperTTS
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ async def test_synthesize_stream_with_mock(
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with (
-        patch("e_template_agents.adapters.tts.AsyncTcpClient", return_value=mock_client),
+        patch("e_agents.adapters.tts.AsyncTcpClient", return_value=mock_client),
         patch.object(AudioChunk, "is_type", side_effect=lambda t: t == "audio-chunk"),
         patch.object(
             AudioChunk,

@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 from livekit.agents import Agent, RunContext, function_tool
 
-from e_template_agents.tasks.status import TaskPriority, TaskStatus
+from e_agents.tasks.status import TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
-    from e_template_agents.models.agent import AgentConfig
-    from e_template_agents.sessions.double_loop import DoubleLoopUserData
-    from e_template_agents.tasks.executor import TaskExecutor
+    from e_agents.models.agent import AgentConfig
+    from e_agents.sessions.double_loop import DoubleLoopUserData
+    from e_agents.tasks.executor import TaskExecutor
 
 
 class AnalystAgent(Agent):
@@ -59,7 +59,7 @@ class AnalystAgent(Agent):
                 "topics": topics,
                 "comparison": {
                     "similarities": [f"Both {topics[0]} and others share common foundations"],
-                    "differences": [f"Key distinction: each topic has unique implications"],
+                    "differences": ["Key distinction: each topic has unique implications"],
                     "synthesis": f"Comparing {len(topics)} perspectives reveals complementary insights.",
                 },
                 "recommendation": "A balanced view considers all perspectives.",
@@ -105,7 +105,10 @@ class AnalystAgent(Agent):
                     {"title": "Overview", "content": f"Comprehensive overview of {topic}"},
                     {"title": "Key Findings", "content": "Three major findings emerged from the analysis"},
                     {"title": "Implications", "content": "These findings have significant practical implications"},
-                    {"title": "Recommendations", "content": "Based on the analysis, several actionable steps are recommended"},
+                    {
+                        "title": "Recommendations",
+                        "content": "Based on the analysis, several actionable steps are recommended",
+                    },
                 ],
                 "word_count": 1200,
                 "quality": "high",
@@ -126,7 +129,9 @@ class AnalystAgent(Agent):
         """Return to the main conversation flow."""
         agents: dict[str, Agent] = context.userdata.agents
         registry = self._userdata.task_registry
-        completed = [t for t in registry.tasks.values() if t.initiated_by == self.id and t.status == TaskStatus.COMPLETED]
+        completed = [
+            t for t in registry.tasks.values() if t.initiated_by == self.id and t.status == TaskStatus.COMPLETED
+        ]
 
         msg = "Returning to main conversation."
         if completed:

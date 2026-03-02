@@ -1,4 +1,4 @@
-"""e-template-agents entry point."""
+"""e-agents entry point."""
 
 import asyncio
 import contextlib
@@ -6,9 +6,9 @@ import contextlib
 import uvicorn
 from fastapi import FastAPI
 
-from e_template_agents.api.router import router
-from e_template_agents.cli import cli
-from e_template_agents.core.settings import settings as st
+from e_agents.api.router import router
+from e_agents.cli.main import cli
+from e_agents.core.settings import settings as st
 
 
 def create_api_app() -> FastAPI:

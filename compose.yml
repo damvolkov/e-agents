@@ -136,7 +136,7 @@ services:
       - STT_BASE_URL=http://stt:8000
       - STT_WS_URL=ws://stt:8000/v1/audio/transcriptions
       - TTS_HOST=tts
-    command: uvicorn e_template_agents.__main__:create_api_app --factory --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn e_agents.main:create_api_app --factory --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s

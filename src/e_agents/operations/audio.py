@@ -13,7 +13,7 @@ from ovld import ovld
 from scipy import signal
 from ten_vad import TenVad
 
-from e_template_agents.core.settings import settings as st
+from e_agents.core.settings import settings as st
 
 
 class AudioFormat(StrEnum):
