@@ -4,26 +4,18 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import ClassVar, Literal
 
 from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-if TYPE_CHECKING:
-    from e_agents.models.agent import AgentsConfig
+from e_agents.models.agent import AgentsConfig
 
 
 def read_pyproject(pyproject_path: Path) -> dict:
     """Read pyproject.toml into a dict."""
     with pyproject_path.open("rb") as file_handle:
         return tomllib.load(file_handle)
-
-
-def load_agents_config(config_path: Path) -> AgentsConfig:
-    """Load agents configuration from YAML file."""
-    from e_agents.models.agent import AgentsConfig
-
-    return AgentsConfig.from_yaml(config_path)
 
 
 def get_version(base_dir: Path) -> str:
@@ -121,7 +113,7 @@ class Settings(BaseSettings):
     def AGENTS_CONFIG(self) -> AgentsConfig:  # noqa: N802
         """Get agents configuration (lazy loaded)."""
         if not hasattr(self, "_agents_config"):
-            self._agents_config = load_agents_config(self.AGENTS_CONFIG_PATH)
+            self._agents_config = AgentsConfig.from_yaml(self.AGENTS_CONFIG_PATH)
         return self._agents_config
 
     @model_validator(mode="after")
