@@ -60,19 +60,16 @@ class Settings(BaseSettings):
     LIVEKIT_API_KEY: str = "devkey"
     LIVEKIT_API_SECRET: str = "secret"
 
-    # STT (WhisperLive)
-    STT_BASE_URL: str = "http://localhost:4100"
-    STT_WS_URL: str = "ws://localhost:4100/v1/audio/transcriptions"
-    STT_MODEL: str = "Systran/faster-whisper-small"
+    # STT (WhisperLive WebSocket)
+    STT_WS_URL: str = "ws://localhost:45120"
+    STT_MODEL: str = "large-v3-turbo"
     STT_LANGUAGE: str = "en"
     STT_TIMEOUT: float = 30.0
 
-    # TTS (Piper via Wyoming)
-    TTS_HOST: str = "localhost"
-    TTS_PORT: int = 10200
-    TTS_SAMPLE_RATE: int = 22050
-    TTS_SILENCE_PADDING: float = 0.15
-    PIPER_VOICE: str = "en_US-lessac-medium"
+    # TTS (Kokoro OpenAI-compatible)
+    TTS_BASE_URL: str = "http://localhost:45130/v1"
+    TTS_MODEL: str = "kokoro"
+    TTS_VOICE: str = "af_heart"
 
     # LLM
     OPENAI_API_KEY: str = ""

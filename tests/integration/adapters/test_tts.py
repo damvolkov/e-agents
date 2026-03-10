@@ -1,49 +1,50 @@
-"""Integration tests for Piper TTS adapter via Wyoming protocol."""
+"""Integration tests for Kokoro TTS adapter via OpenAI-compatible API."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
-from wyoming.audio import AudioChunk
-from wyoming.event import Event
 
-from e_agents.adapters.livekit.tts import PiperChunkedStream, PiperTTS
+from e_agents.adapters.livekit.tts import KokoroChunkedStream, KokoroTTS
 
 
 @pytest.fixture
-def tts_adapter() -> PiperTTS:
+def tts_adapter() -> KokoroTTS:
     """Create TTS adapter instance."""
-    return PiperTTS(host="localhost", port=10200)
+    return KokoroTTS(base_url="http://localhost:45130/v1")
 
 
 @pytest.fixture
-def mock_audio_chunk() -> bytes:
-    """Generate mock PCM audio data."""
-    return b"\x00\x00" * 2205  # 100ms at 22050Hz mono 16-bit
+def mock_pcm_chunk() -> bytes:
+    """Generate mock PCM audio data (100ms at 24kHz mono 16-bit)."""
+    return b"\x00\x00" * 2400
 
 
 @pytest.mark.parametrize(
-    ("host", "port"),
+    ("base_url", "model", "voice"),
     [
-        ("localhost", 10200),
-        ("piper", 10200),
-        ("192.168.1.100", 5000),
+        ("http://localhost:45130/v1", "kokoro", "af_heart"),
+        ("http://tts:8880/v1", "kokoro", "bf_emma"),
+        ("http://192.168.1.100:8880/v1", "kokoro", "am_michael"),
     ],
+    ids=["local", "docker", "remote"],
 )
-def test_tts_init_config(host: str, port: int) -> None:
+def test_tts_init_config(base_url: str, model: str, voice: str) -> None:
     """Test TTS adapter initialization with different configs."""
-    tts = PiperTTS(host=host, port=port)
-    assert tts._host == host
-    assert tts._port == port
+    tts = KokoroTTS(base_url=base_url, model=model, voice=voice)
+    assert tts._base_url == base_url.rstrip("/")
+    assert tts._model == model
+    assert tts._voice == voice
 
 
-async def test_tts_provider_and_model(tts_adapter: PiperTTS) -> None:
+async def test_tts_provider_and_model(tts_adapter: KokoroTTS) -> None:
     """Test TTS adapter properties."""
-    assert tts_adapter.provider == "piper-wyoming"
-    assert tts_adapter.model.startswith("piper/")
+    assert tts_adapter.provider == "kokoro"
+    assert tts_adapter.model.startswith("kokoro/")
     await tts_adapter.aclose()
 
 
-async def test_tts_capabilities(tts_adapter: PiperTTS) -> None:
+async def test_tts_capabilities(tts_adapter: KokoroTTS) -> None:
     """Test TTS adapter capabilities."""
     assert tts_adapter.capabilities.streaming is False
     await tts_adapter.aclose()
@@ -52,14 +53,15 @@ async def test_tts_capabilities(tts_adapter: PiperTTS) -> None:
 @pytest.mark.parametrize(
     ("sample_rate", "num_channels"),
     [
-        (22050, 1),
+        (24000, 1),
         (16000, 1),
         (44100, 2),
     ],
+    ids=["24k-mono", "16k-mono", "44k-stereo"],
 )
 async def test_tts_audio_properties(sample_rate: int, num_channels: int) -> None:
     """Test TTS adapter audio properties."""
-    tts = PiperTTS(sample_rate=sample_rate, num_channels=num_channels)
+    tts = KokoroTTS(sample_rate=sample_rate, num_channels=num_channels)
     assert tts.sample_rate == sample_rate
     assert tts.num_channels == num_channels
     await tts.aclose()
@@ -73,55 +75,43 @@ async def test_tts_audio_properties(sample_rate: int, num_channels: int) -> None
         "Special chars: !@#$%",
         "",
     ],
+    ids=["simple", "numbers", "special", "empty"],
 )
-async def test_synthesize_returns_stream(tts_adapter: PiperTTS, text: str) -> None:
+async def test_synthesize_returns_stream(tts_adapter: KokoroTTS, text: str) -> None:
     """Test synthesize method returns a stream object."""
     stream = tts_adapter.synthesize(text)
-    assert isinstance(stream, PiperChunkedStream)
+    assert isinstance(stream, KokoroChunkedStream)
     await tts_adapter.aclose()
 
 
 async def test_synthesize_stream_with_mock(
-    tts_adapter: PiperTTS,
-    mock_audio_chunk: bytes,
+    tts_adapter: KokoroTTS,
+    mock_pcm_chunk: bytes,
 ) -> None:
-    """Test TTS synthesis streaming with mocked Wyoming connection."""
-    # Create mock events
-    audio_events: list[Event | None] = []
-    for _ in range(3):
-        event = MagicMock(spec=Event)
-        event.type = "audio-chunk"
-        event.data = {"rate": 22050, "width": 2, "channels": 1}
-        event.payload = mock_audio_chunk
-        audio_events.append(event)
-    audio_events.append(None)
+    """Test TTS synthesis streaming with mocked HTTP response."""
+    mock_response = AsyncMock()
+    mock_response.raise_for_status = MagicMock()
 
-    call_count = 0
+    chunks_sent = [mock_pcm_chunk, mock_pcm_chunk, mock_pcm_chunk]
+    chunk_iter_index = 0
 
-    async def mock_read_event() -> Event | None:
-        nonlocal call_count
-        if call_count >= len(audio_events):
-            return None
-        event = audio_events[call_count]
-        call_count += 1
-        return event
+    async def mock_aiter_bytes(size: int = 4096):
+        nonlocal chunk_iter_index
+        for chunk in chunks_sent:
+            yield chunk
 
-    # Create mock client
-    mock_client = MagicMock()
-    mock_client.write_event = AsyncMock()
-    mock_client.read_event = mock_read_event
+    mock_response.aiter_bytes = mock_aiter_bytes
+
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.stream = MagicMock(return_value=mock_stream_ctx)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with (
-        patch("e_agents.adapters.livekit.tts.AsyncTcpClient", return_value=mock_client),
-        patch.object(AudioChunk, "is_type", side_effect=lambda t: t == "audio-chunk"),
-        patch.object(
-            AudioChunk,
-            "from_event",
-            side_effect=lambda e: MagicMock(audio=mock_audio_chunk),
-        ),
-    ):
+    with patch("e_agents.adapters.livekit.tts.httpx.AsyncClient", return_value=mock_client):
         stream = tts_adapter.synthesize("Hello world")
 
         chunks_received = []
@@ -130,12 +120,12 @@ async def test_synthesize_stream_with_mock(
                 if hasattr(event, "frame") and event.frame:
                     chunks_received.append(event.frame.data)
 
-        assert len(chunks_received) >= 1  # At least one chunk should be received
+        assert len(chunks_received) >= 1
 
     await tts_adapter.aclose()
 
 
-async def test_aclose_is_noop(tts_adapter: PiperTTS) -> None:
+async def test_aclose_is_noop(tts_adapter: KokoroTTS) -> None:
     """Test aclose method is a no-op (no persistent connections)."""
     await tts_adapter.aclose()
-    await tts_adapter.aclose()  # Should not raise
+    await tts_adapter.aclose()

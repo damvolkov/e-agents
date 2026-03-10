@@ -1,74 +1,67 @@
-"""TTS plugin for Piper via Wyoming protocol."""
+"""TTS adapter for Kokoro via OpenAI-compatible API."""
 
-import asyncio
-import contextlib
-
+import httpx
 from livekit.agents import tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 from livekit.agents.utils import shortuuid
-from wyoming.audio import AudioChunk, AudioStop
-from wyoming.client import AsyncTcpClient
-from wyoming.tts import Synthesize
 
 from e_agents.shared.settings import settings as st
 
 
-class PiperChunkedStream(tts.ChunkedStream):
-    """Chunked TTS implementation for Piper via Wyoming."""
+class KokoroChunkedStream(tts.ChunkedStream):
+    """Stream audio chunks from Kokoro OpenAI-compatible /audio/speech endpoint."""
 
     def __init__(
         self,
         *,
-        tts_instance: "PiperTTS",
+        tts_instance: "KokoroTTS",
         input_text: str,
         conn_options: APIConnectOptions,
     ) -> None:
         super().__init__(tts=tts_instance, input_text=input_text, conn_options=conn_options)
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        """Stream audio chunks from Piper via Wyoming protocol."""
-        tts_instance: PiperTTS = self._tts  # type: ignore
-        client = AsyncTcpClient(tts_instance._host, tts_instance._port)
-        await client.connect()
+        """Stream PCM audio from Kokoro's OpenAI-compatible endpoint."""
+        tts_instance: KokoroTTS = self._tts  # type: ignore
 
-        try:
-            await client.write_event(Synthesize(text=self._input_text).event())
+        output_emitter.initialize(
+            request_id=shortuuid(),
+            sample_rate=tts_instance.sample_rate,
+            num_channels=tts_instance.num_channels,
+            mime_type="audio/pcm",
+        )
 
-            output_emitter.initialize(
-                request_id=shortuuid(),
-                sample_rate=tts_instance.sample_rate,
-                num_channels=tts_instance.num_channels,
-                mime_type="audio/pcm",
-            )
-
-            while True:
-                event = await client.read_event()
-                if event is None:
-                    break
-
-                if AudioChunk.is_type(event.type):
-                    output_emitter.push(AudioChunk.from_event(event).audio)
-                elif AudioStop.is_type(event.type):
-                    break
-
-            silence_samples = int(tts_instance.sample_rate * st.TTS_SILENCE_PADDING)
-            silence_bytes = b"\x00\x00" * silence_samples * tts_instance.num_channels
-            output_emitter.push(silence_bytes)
-
-        finally:
-            with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
-                await asyncio.wait_for(client.disconnect(), timeout=0.5)
+        async with (
+            httpx.AsyncClient(
+                base_url=tts_instance._base_url,
+                timeout=httpx.Timeout(30.0),
+            ) as client,
+            client.stream(
+                "POST",
+                "/audio/speech",
+                json={
+                    "model": tts_instance._model,
+                    "input": self._input_text,
+                    "voice": tts_instance._voice,
+                    "response_format": "pcm",
+                },
+            ) as response,
+        ):
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes(4096):
+                output_emitter.push(chunk)
 
 
-class PiperTTS(tts.TTS):
-    """TTS plugin for Piper via Wyoming protocol."""
+class KokoroTTS(tts.TTS):
+    """TTS adapter for Kokoro via OpenAI-compatible API."""
 
     def __init__(
         self,
         *,
-        host: str = st.TTS_HOST,
-        port: int = st.TTS_PORT,
-        sample_rate: int = st.TTS_SAMPLE_RATE,
+        base_url: str = st.TTS_BASE_URL,
+        model: str = st.TTS_MODEL,
+        voice: str = st.TTS_VOICE,
+        sample_rate: int = st.AUDIO_SAMPLE_RATE,
         num_channels: int = st.AUDIO_CHANNELS,
     ) -> None:
         super().__init__(
@@ -76,16 +69,17 @@ class PiperTTS(tts.TTS):
             sample_rate=sample_rate,
             num_channels=num_channels,
         )
-        self._host = host
-        self._port = port
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._voice = voice
 
     @property
     def model(self) -> str:
-        return f"piper/{st.PIPER_VOICE}"
+        return f"kokoro/{self._voice}"
 
     @property
     def provider(self) -> str:
-        return "piper-wyoming"
+        return "kokoro"
 
     def synthesize(
         self,
@@ -93,8 +87,8 @@ class PiperTTS(tts.TTS):
         *,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> tts.ChunkedStream:
-        """Synthesize text to streaming audio."""
-        return PiperChunkedStream(
+        """Synthesize text to streaming PCM audio via Kokoro."""
+        return KokoroChunkedStream(
             tts_instance=self,
             input_text=text,
             conn_options=conn_options,

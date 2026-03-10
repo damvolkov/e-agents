@@ -154,13 +154,35 @@ logs:
 # -----------------------------------------------------------------------------
 # Local Development
 # -----------------------------------------------------------------------------
+
+# Service ports (matching e-core registry defaults)
+REDIS_EXT_PORT  ?= 6380
+LIVEKIT_EXT_PORT ?= 7880
+STT_EXT_PORT    ?= 45120
+TTS_EXT_PORT    ?= 45130
+
+define ensure_service
+	@if ! nc -z localhost $(1) 2>/dev/null; then \
+		echo "$(YELLOW)=== Starting $(2) (port $(1)) ===$(RESET)"; \
+		docker compose -f $(COMPOSE_FILE) up -d $(2); \
+	else \
+		echo "$(GREEN)=== $(2) already running (port $(1)) ===$(RESET)"; \
+	fi
+endef
+
 run:
 	@echo "$(GREEN)=== Starting Agent Server (session=$(SESSION)) ===$(RESET)"
 	@uv run cli run --session $(SESSION)
 
-console:
+console: _ensure-deps
 	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION) lang=$(LANGUAGE)) ===$(RESET)"
 	@STT_LANGUAGE=$(LANGUAGE) uv run cli console --session $(SESSION)
+
+_ensure-deps:
+	$(call ensure_service,$(REDIS_EXT_PORT),redis)
+	$(call ensure_service,$(LIVEKIT_EXT_PORT),livekit)
+	$(call ensure_service,$(STT_EXT_PORT),stt)
+	$(call ensure_service,$(TTS_EXT_PORT),tts)
 
 # Join variables
 IDENTITY ?= user

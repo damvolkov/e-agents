@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from livekit import rtc
 
-from e_agents.adapters.livekit.stt import WhisperSTT
-from e_agents.adapters.livekit.tts import PiperTTS
+from e_agents.adapters.livekit.stt import WhisperLiveSTT
+from e_agents.adapters.livekit.tts import KokoroTTS
 
 
 @pytest.fixture
@@ -73,16 +73,16 @@ def sample_wav_bytes() -> bytes:
 
 
 @pytest.fixture
-async def stt_adapter() -> AsyncIterator[WhisperSTT]:
+async def stt_adapter() -> AsyncIterator[WhisperLiveSTT]:
     """Create STT adapter with automatic cleanup."""
-    adapter = WhisperSTT(base_url="http://test-stt:8000")
+    adapter = WhisperLiveSTT(ws_url="ws://test-stt:9090")
     yield adapter
     await adapter.aclose()
 
 
 @pytest.fixture
-async def tts_adapter() -> AsyncIterator[PiperTTS]:
+async def tts_adapter() -> AsyncIterator[KokoroTTS]:
     """Create TTS adapter with automatic cleanup."""
-    adapter = PiperTTS(host="localhost", port=10200)
+    adapter = KokoroTTS(base_url="http://test-tts:8880/v1")
     yield adapter
     await adapter.aclose()

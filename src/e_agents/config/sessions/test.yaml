@@ -2,8 +2,8 @@ name: test
 
 session:
   # -- adapters --
-  stt: whisper
-  tts: piper
+  stt: whisperlive
+  tts: kokoro
   vad: silero
   llm:
     provider: openai

@@ -68,22 +68,22 @@ services:
         condition: service_started
 
   stt:
-    image: fedirz/faster-whisper-server:latest-cuda
+    image: ghcr.io/collabora/whisperlive-gpu:latest
     container_name: stt
     hostname: stt
     ports:
-      - "4100:8000"
+      - "${STT_PORT:-45120}:9090"
     volumes:
-      - ./data/stt/models:/root/.cache/huggingface
+      - ./data/stt:/root/.cache/huggingface
     environment:
-      - WHISPER__INFERENCE_DEVICE=auto
-      - WHISPER__MODEL=Systran/faster-whisper-small
+      - WHISPER_MODEL=${STT_WHISPER_MODEL:-large-v3-turbo}
+      - PROVIDER=cuda
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 1m30s
-      timeout: 30s
+      test: ["CMD", "python", "-c", "import asyncio,websockets; asyncio.run(websockets.connect('ws://localhost:9090').__aenter__())"]
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 10s
+      start_period: 120s
     deploy:
       resources:
         reservations:
@@ -91,30 +91,36 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    restart: always
+    restart: unless-stopped
     networks:
       - agents
 
   tts:
-    image: lscr.io/linuxserver/piper:latest
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
     container_name: tts
     hostname: tts
-    env_file: .env
     ports:
-      - "10200:10200"
+      - "${TTS_PORT:-45130}:8880"
     volumes:
-      - ./data/tts/piper:/config
+      - ./data/tts:/app/voices
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Etc/UTC
+      - OUTPUT_FORMAT=mp3
+      - DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-af_heart}
+      - USE_GPU=true
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "10200"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8880/v1/models || exit 1"]
+      interval: 15s
+      timeout: 5s
       retries: 5
-      start_period: 30s
-    restart: always
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
     networks:
       - agents
 
@@ -133,9 +139,8 @@ services:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_WS_URL=ws://livekit:7880
       - REDIS_ADDRESS=redis:6379
-      - STT_BASE_URL=http://stt:8000
-      - STT_WS_URL=ws://stt:8000/v1/audio/transcriptions
-      - TTS_HOST=tts
+      - STT_WS_URL=ws://stt:9090
+      - TTS_BASE_URL=http://tts:8880/v1
     command: uvicorn e_agents.main:create_api_app --factory --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]

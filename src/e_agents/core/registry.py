@@ -12,8 +12,8 @@ from typing import Any, ClassVar
 
 from livekit.agents import stt, tts
 
-from e_agents.adapters.livekit.stt import WhisperSTT
-from e_agents.adapters.livekit.tts import PiperTTS
+from e_agents.adapters.livekit.stt import WhisperLiveSTT
+from e_agents.adapters.livekit.tts import KokoroTTS
 from e_agents.shared.logger import LogIcon, logger
 
 
@@ -23,8 +23,8 @@ class ProviderRegistry:
     All methods are class-level — no instance needed.
     """
 
-    _stt: ClassVar[dict[str, type]] = {"whisper": WhisperSTT}
-    _tts: ClassVar[dict[str, type]] = {"piper": PiperTTS}
+    _stt: ClassVar[dict[str, type]] = {"whisperlive": WhisperLiveSTT}
+    _tts: ClassVar[dict[str, type]] = {"kokoro": KokoroTTS}
     _llm: ClassVar[dict[str, type]] = {}
     _populated: ClassVar[bool] = False
 

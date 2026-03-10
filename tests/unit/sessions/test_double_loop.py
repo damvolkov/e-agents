@@ -127,10 +127,20 @@ async def test_task_registry_notifications_ordered_by_priority(task_registry: Ta
         id="low", name="Low", description="", initiated_by="a", priority=TaskPriority.LOW, status=TaskStatus.COMPLETED
     )
     high_task: BackgroundTask[str] = BackgroundTask(
-        id="high", name="High", description="", initiated_by="a", priority=TaskPriority.HIGH, status=TaskStatus.COMPLETED
+        id="high",
+        name="High",
+        description="",
+        initiated_by="a",
+        priority=TaskPriority.HIGH,
+        status=TaskStatus.COMPLETED,
     )
     normal_task: BackgroundTask[str] = BackgroundTask(
-        id="normal", name="Normal", description="", initiated_by="a", priority=TaskPriority.NORMAL, status=TaskStatus.COMPLETED
+        id="normal",
+        name="Normal",
+        description="",
+        initiated_by="a",
+        priority=TaskPriority.NORMAL,
+        status=TaskStatus.COMPLETED,
     )
 
     task_registry.notifications = [
