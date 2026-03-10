@@ -1,11 +1,12 @@
 """STT plugin for faster-whisper-server HTTP API."""
 
 import httpx
+from livekit import rtc
 from livekit.agents import stt
 from livekit.agents.types import NOT_GIVEN, APIConnectOptions, NotGivenOr
 from livekit.agents.utils import AudioBuffer
 
-from e_agents.core.settings import settings as st
+from e_agents.shared.settings import settings as st
 
 
 class WhisperSTT(stt.STT):
@@ -55,8 +56,6 @@ class WhisperSTT(stt.STT):
         conn_options: APIConnectOptions,
     ) -> stt.SpeechEvent:
         """Transcribe audio buffer via HTTP POST."""
-        from livekit import rtc
-
         effective_lang: str = language if isinstance(language, str) else self._language
 
         combined = rtc.combine_audio_frames(buffer)

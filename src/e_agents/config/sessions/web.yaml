@@ -1,0 +1,26 @@
+name: web
+
+session:
+  stt: google
+  tts: google
+  vad: silero
+  llm:
+    provider: google
+    model: gemini-2.0-flash
+  max_tool_steps: 10
+  allow_interruptions: true
+  min_endpointing_delay: 0.5
+  max_endpointing_delay: 3.0
+
+dispatcher: assistant
+
+agents:
+  assistant:
+    role: outer
+    handoffs:
+      - target: web_scraper
+        description: "Hand off to the web scraper for fetching and extracting web content"
+
+  web_scraper:
+    role: inner
+    return_to: assistant

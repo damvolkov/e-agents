@@ -6,7 +6,6 @@ from fastapi import APIRouter
 from livekit import api
 
 from e_agents.api.deps import generate_access_token, get_livekit_api
-from e_agents.core.settings import settings as st
 from e_agents.models.api import (
     DispatchRequest,
     DispatchResponse,
@@ -15,6 +14,7 @@ from e_agents.models.api import (
     TokenRequest,
     TokenResponse,
 )
+from e_agents.shared.settings import settings as st
 
 router = APIRouter(prefix="/api/v1", tags=["livekit"])
 

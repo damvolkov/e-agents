@@ -6,7 +6,8 @@ VERSION ?= latest
 DEBUG ?= true
 ENVIRONMENT ?= DEV
 PACKAGE ?= src/e_agents
-SESSION ?= double_loop
+SESSION ?= web
+LANGUAGE ?= es
 
 # OS Detection
 OS := $(shell uname -s)
@@ -57,7 +58,7 @@ help:
 	@echo "  $(GREEN)make token$(RESET)        Generate LiveKit access token"
 	@echo ""
 	@echo "$(BOLD)Variables:$(RESET)"
-	@echo "  $(CYAN)SESSION$(RESET)=$(SESSION)    Session type (double_loop)"
+	@echo "  $(CYAN)SESSION$(RESET)=$(SESSION)    Session name"
 	@echo "  $(CYAN)ROOM$(RESET)=test-room      Room name for join/token"
 	@echo "  $(CYAN)IDENTITY$(RESET)=user       Participant identity"
 	@echo "  $(CYAN)TTL$(RESET)=60              Token TTL in minutes"
@@ -155,11 +156,11 @@ logs:
 # -----------------------------------------------------------------------------
 run:
 	@echo "$(GREEN)=== Starting Agent Server (session=$(SESSION)) ===$(RESET)"
-	@uv run python -m e_agents.main run --session $(SESSION)
+	@uv run cli run --session $(SESSION)
 
 console:
-	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION)) ===$(RESET)"
-	@uv run python -m e_agents.main console --session $(SESSION)
+	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION) lang=$(LANGUAGE)) ===$(RESET)"
+	@STT_LANGUAGE=$(LANGUAGE) uv run cli console --session $(SESSION)
 
 # Join variables
 IDENTITY ?= user
@@ -168,10 +169,10 @@ TTL ?= 60
 
 join:
 	@echo "$(GREEN)=== Joining room=$(ROOM) as identity=$(IDENTITY) ===$(RESET)"
-	@uv run python -m e_agents.main join --room $(ROOM) --identity $(IDENTITY) --ttl $(TTL)
+	@uv run cli join --room $(ROOM) --identity $(IDENTITY) --ttl $(TTL)
 
 token:
-	@uv run python -m e_agents.main token generate --identity $(IDENTITY) --room $(ROOM) --ttl $(TTL)
+	@uv run cli token generate --identity $(IDENTITY) --room $(ROOM) --ttl $(TTL)
 
 # -----------------------------------------------------------------------------
 # Cleanup

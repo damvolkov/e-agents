@@ -1,0 +1,31 @@
+tools:
+  - name: compare_topics
+    description: "Compare and contrast multiple topics."
+    parameters:
+      - name: topics
+        type: list[str]
+        description: "List of topics to compare"
+
+  - name: generate_report
+    description: "Generate a comprehensive analytical report."
+    parameters:
+      - name: topic
+        type: str
+        description: "Report topic"
+
+  - name: verify_claim
+    description: "Verify a factual claim against multiple sources."
+    parameters:
+      - name: claim
+        type: str
+        description: "The claim to verify"
+
+  - name: cross_reference
+    description: "Cross-reference a claim against specific sources."
+    parameters:
+      - name: claim
+        type: str
+        description: "The claim to cross-reference"
+      - name: sources
+        type: list[str]
+        description: "Source types to check"

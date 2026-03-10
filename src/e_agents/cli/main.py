@@ -20,7 +20,7 @@ cli.add_typer(token_app, name="token", help="LiveKit token management")
 
 @cli.command("run")
 def run(
-    session: str = typer.Option("double_loop", "--session", "-s", help="Session type"),
+    session: str = typer.Option("test", "--session", "-s", help="Session name"),
 ) -> None:
     """Run the agent server in dev mode."""
     run_session(session=session, mode="dev")
@@ -28,7 +28,7 @@ def run(
 
 @cli.command("console")
 def console(
-    session: str = typer.Option("double_loop", "--session", "-s", help="Session type"),
+    session: str = typer.Option("test", "--session", "-s", help="Session name"),
 ) -> None:
     """Run agent in console mode for local testing."""
     run_session(session=session, mode="console")

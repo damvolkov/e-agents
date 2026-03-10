@@ -2,10 +2,11 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from livekit import api
 
-from e_agents.core.settings import settings as st
+from e_agents.shared.settings import settings as st
 
 
 @asynccontextmanager
@@ -31,8 +32,6 @@ def generate_access_token(
     can_publish_data: bool = True,
 ) -> str:
     """Generate a LiveKit access token."""
-    from datetime import timedelta
-
     grants = api.VideoGrants(
         room_join=True,
         room=room,

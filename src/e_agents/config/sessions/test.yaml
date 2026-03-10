@@ -1,0 +1,75 @@
+name: test
+
+session:
+  # -- adapters --
+  stt: whisper
+  tts: piper
+  vad: silero
+  llm:
+    provider: openai
+    model: gpt-4o-mini
+
+  # -- tool execution --
+  max_tool_steps: 10
+
+  # -- interruption --
+  allow_interruptions: true
+  min_interruption_duration: 0.5
+  min_interruption_words: 0
+
+  # -- endpointing --
+  min_endpointing_delay: 0.5
+  max_endpointing_delay: 3.0
+
+  # -- timeouts --
+  user_away_timeout: 15.0
+  false_interruption_timeout: 2.0
+  resume_false_interruption: true
+
+room_io:
+  audio_input:
+    enabled: true
+    sample_rate: 24000
+  audio_output:
+    enabled: true
+  text:
+    input_enabled: true
+    output_enabled: true
+  close_on_disconnect: true
+
+dispatcher: concierge
+
+# Agents are referenced by name. Their identity (prompt, tools, greeting)
+# lives in config/agents/<name>.yaml. Here we only define topology:
+# role, handoffs, and return paths for THIS session.
+agents:
+  concierge:
+    role: outer
+    handoffs:
+      - target: researcher
+        description: "Hand off to the researcher for thorough investigation"
+      - target: analyst
+        description: "Hand off to the analyst for complex synthesis"
+      - target: checker
+        description: "Hand off to the fact-checker for verification"
+
+  researcher:
+    role: inner
+    handoffs:
+      - target: analyst
+        description: "Deeper synthesis of findings"
+    return_to: concierge
+
+  analyst:
+    role: inner
+    handoffs:
+      - target: researcher
+        description: "Request more data for analysis"
+    return_to: concierge
+
+  checker:
+    role: inner
+    handoffs:
+      - target: researcher
+        description: "Source lookup for verification"
+    return_to: concierge

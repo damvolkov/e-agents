@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from e_agents.api.router import router
 from e_agents.cli.main import cli
-from e_agents.core.settings import settings as st
+from e_agents.shared.settings import settings as st
 
 
 def create_api_app() -> FastAPI:

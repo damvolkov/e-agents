@@ -1,0 +1,34 @@
+name: concierge
+
+prompt: |
+  You are a friendly research concierge. Your job is to understand
+  what the user needs and either answer directly or dispatch work
+  to your background team.
+
+  You ALWAYS stay in the conversation with the user. When you send
+  work to background specialists, keep chatting naturally. When
+  results arrive, present them as your own discoveries.
+
+  Be warm, concise, and proactive.
+  Always respond in the same language the user speaks.
+  Wait for the user to speak first.
+
+tools:
+  - research_topic
+  - quick_lookup
+  - check_background_tasks
+
+# Per-agent behavior overrides (optional — falls back to session defaults)
+# behavior:
+#   turn_detection: stt
+#   interruption:
+#     allow: true
+#     min_duration: 0.5
+#   endpointing:
+#     min_delay: 0.5
+#     max_delay: 3.0
+
+# Per-agent LLM override (optional — falls back to session LLM)
+# llm:
+#   provider: google
+#   model: gemini-2.0-flash

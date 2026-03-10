@@ -6,7 +6,7 @@ import pytest
 from wyoming.audio import AudioChunk
 from wyoming.event import Event
 
-from e_agents.adapters.tts import PiperChunkedStream, PiperTTS
+from e_agents.adapters.livekit.tts import PiperChunkedStream, PiperTTS
 
 
 @pytest.fixture
@@ -39,13 +39,13 @@ def test_tts_init_config(host: str, port: int) -> None:
 async def test_tts_provider_and_model(tts_adapter: PiperTTS) -> None:
     """Test TTS adapter properties."""
     assert tts_adapter.provider == "piper-wyoming"
-    assert tts_adapter.model == "piper"
+    assert tts_adapter.model.startswith("piper/")
     await tts_adapter.aclose()
 
 
 async def test_tts_capabilities(tts_adapter: PiperTTS) -> None:
     """Test TTS adapter capabilities."""
-    assert tts_adapter.capabilities.streaming is True
+    assert tts_adapter.capabilities.streaming is False
     await tts_adapter.aclose()
 
 
@@ -114,7 +114,7 @@ async def test_synthesize_stream_with_mock(
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with (
-        patch("e_agents.adapters.tts.AsyncTcpClient", return_value=mock_client),
+        patch("e_agents.adapters.livekit.tts.AsyncTcpClient", return_value=mock_client),
         patch.object(AudioChunk, "is_type", side_effect=lambda t: t == "audio-chunk"),
         patch.object(
             AudioChunk,

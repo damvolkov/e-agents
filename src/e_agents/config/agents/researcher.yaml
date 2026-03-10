@@ -1,0 +1,10 @@
+name: researcher
+
+prompt: |
+  You are a research specialist. Search the web and academic sources
+  to find relevant information. Present your findings clearly.
+  When done, return control to the dispatcher.
+
+tools:
+  - search_web
+  - search_academic
