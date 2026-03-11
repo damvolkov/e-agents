@@ -42,13 +42,15 @@ dependencies = [
     "websockets>=15.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
-    "typer>=0.16.0",
     "pyyaml>=6.0.3",
+    "mcp>=1.26.0",
+    "cyclopts>=4.8.0",
+    "rich>=14.2.0",
 ]
 
 [project.scripts]
 e-agents = "e_agents.main:main"
-cli = "e_agents.cli.main:cli"
+cli = "e_agents.main:main"
 
 [project.urls]
 Documentation = "https://github.com/eagerworks/e-agents#readme"
@@ -65,6 +67,11 @@ dev = [
     "pre-commit>=4.4.0",
     "ty>=0.0.5",
     "respx>=0.22.0",
+    "pytest-cov>=7.0.0",
+    "polyfactory>=3.3.0",
+    "pytest-httpserver>=1.1.5",
+    "pytest-cover>=3.0.0",
+    "pytest-coverage>=0.0",
 ]
 
 [tool.hatch.version]
@@ -82,12 +89,13 @@ bump = true
 installer = "uv"
 
 [tool.hatch.envs.default.scripts]
-run = "python -m e_agents.main"
-console = "python -m e_agents.main console"
+dev = "python -m e_agents.main lk dev"
+run = "python -m e_agents.main lk start"
+console = "python -m e_agents.main lk console"
 lint = "ruff check --fix ."
 format = "ruff format ."
 typecheck = "ty typecheck"
-test = "python -m pytest tests/unit -v"
+test = "python -m pytest tests/unit -v --cov --cov-report=term-missing"
 test-integration = "python -m pytest tests/integration -v"
 
 [tool.pytest.ini_options]
@@ -109,7 +117,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/e_agents/operations/audio.py" = ["F811"]
+"src/e_agents/rtc/operations/audio.py" = ["F811"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["e_agents"]
@@ -123,6 +131,38 @@ possibly-unresolved-reference = "error"
 unresolved-import = "error"
 invalid-overload = "ignore"
 useless-overload-body = "ignore"
+
+[tool.coverage.run]
+source = ["e_agents"]
+branch = true
+omit = [
+    "src/e_agents/main.py",
+    "src/e_agents/cli/*",
+    "src/e_agents/api/*",
+    "src/e_agents/rtc/adapters/*",
+    "src/e_agents/rtc/app.py",
+    "src/e_agents/rtc/builder.py",
+    "src/e_agents/rtc/registry.py",
+    "src/e_agents/rtc/loader.py",
+    "src/e_agents/rtc/tools/*",
+    "src/e_agents/shared/adapters/*",
+    "src/e_agents/shared/core/*",
+    "src/e_agents/shared/state.py",
+    "src/e_agents/rtc/core/*",
+    "src/e_agents/api/core/*",
+    "src/e_agents/cli/core/*",
+]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+    "@overload",
+]
 
 [tool.uv.sources]
 ten-vad = { git = "https://github.com/TEN-framework/ten-vad.git" }

@@ -1,0 +1,20 @@
+name: web
+stt: whisperlive
+tts: kokoro
+vad: silero
+llm:
+  provider: google
+  model: gemini-2.0-flash
+max_tool_steps: 10
+allow_interruptions: true
+min_endpointing_delay: 0.5
+max_endpointing_delay: 3.0
+dispatcher: assistant
+agents:
+  - assistant
+  - web_scraper
+  - researcher
+state:
+  - user_name
+  - conversation_topic
+  - last_search_query

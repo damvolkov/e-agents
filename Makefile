@@ -32,7 +32,7 @@ COMPOSE_FILE := compose.yml
 
 .PHONY: help install sync lock lint format type test \
         infra infra-down build logs \
-        run console join token clean
+        run console join token script clean
 
 # -----------------------------------------------------------------------------
 # Help
@@ -56,6 +56,7 @@ help:
 	@echo "  $(GREEN)make console$(RESET)      Start agent in console mode (local testing)"
 	@echo "  $(GREEN)make join$(RESET)         Join a room as participant"
 	@echo "  $(GREEN)make token$(RESET)        Generate LiveKit access token"
+	@echo "  $(GREEN)make script$(RESET)       Run a script with infra (SCRIPT=path/to/script.py)"
 	@echo ""
 	@echo "$(BOLD)Variables:$(RESET)"
 	@echo "  $(CYAN)SESSION$(RESET)=$(SESSION)    Session name"
@@ -156,33 +157,49 @@ logs:
 # -----------------------------------------------------------------------------
 
 # Service ports (matching e-core registry defaults)
-REDIS_EXT_PORT  ?= 6380
+REDIS_EXT_PORT  ?= 6379
 LIVEKIT_EXT_PORT ?= 7880
 STT_EXT_PORT    ?= 45120
 TTS_EXT_PORT    ?= 45130
 
-define ensure_service
-	@if ! nc -z localhost $(1) 2>/dev/null; then \
-		echo "$(YELLOW)=== Starting $(2) (port $(1)) ===$(RESET)"; \
-		docker compose -f $(COMPOSE_FILE) up -d $(2); \
-	else \
-		echo "$(GREEN)=== $(2) already running (port $(1)) ===$(RESET)"; \
-	fi
-endef
-
-run:
+run: _ensure-deps
 	@echo "$(GREEN)=== Starting Agent Server (session=$(SESSION)) ===$(RESET)"
 	@uv run cli run --session $(SESSION)
 
 console: _ensure-deps
-	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION) lang=$(LANGUAGE)) ===$(RESET)"
-	@STT_LANGUAGE=$(LANGUAGE) uv run cli console --session $(SESSION)
+	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION)) ===$(RESET)"
+	@uv run cli console --session $(SESSION)
+
+COMPOSE_NETWORK := e-agents_agents
 
 _ensure-deps:
-	$(call ensure_service,$(REDIS_EXT_PORT),redis)
-	$(call ensure_service,$(LIVEKIT_EXT_PORT),livekit)
-	$(call ensure_service,$(STT_EXT_PORT),stt)
-	$(call ensure_service,$(TTS_EXT_PORT),tts)
+	@all_up=true; \
+	for pair in "$(REDIS_EXT_PORT):redis" "$(LIVEKIT_EXT_PORT):livekit" "$(STT_EXT_PORT):stt" "$(TTS_EXT_PORT):tts"; do \
+		port=$${pair%%:*}; svc=$${pair##*:}; \
+		if nc -z localhost $$port 2>/dev/null; then \
+			echo "$(GREEN)=== $$svc already running (port $$port) ===$(RESET)"; \
+		else \
+			all_up=false; \
+			echo "$(YELLOW)=== $$svc not running (port $$port) ===$(RESET)"; \
+		fi; \
+	done; \
+	if ! nc -z localhost $(LIVEKIT_EXT_PORT) 2>/dev/null; then \
+		echo "$(YELLOW)=== Starting livekit ===$(RESET)"; \
+		docker network create $(COMPOSE_NETWORK) 2>/dev/null || true; \
+		docker network connect $(COMPOSE_NETWORK) redis 2>/dev/null || true; \
+		docker compose -f $(COMPOSE_FILE) up -d --no-deps livekit; \
+	fi; \
+	if [ "$$all_up" = true ]; then \
+		echo "$(GREEN)=== All services running ===$(RESET)"; \
+	fi
+
+SCRIPT ?=
+script: _ensure-deps
+ifndef SCRIPT
+	@echo "$(RED)=== Usage: make script SCRIPT=tests/scripts/test_dloop.py ===$(RESET)"; exit 1
+endif
+	@echo "$(GREEN)=== Running script $(SCRIPT) ===$(RESET)"
+	@uv run $(SCRIPT)
 
 # Join variables
 IDENTITY ?= user

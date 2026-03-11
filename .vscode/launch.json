@@ -2,21 +2,48 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "local",
+            "name": "Console (web)",
             "type": "debugpy",
             "request": "launch",
-            "module": "robyn",
-            "args": ["app/main.py", "--dev"],
+            "module": "e_agents.cli.main",
+            "args": ["console", "--session", "web"],
             "cwd": "${workspaceFolder}",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "PYTHONPATH": "${workspaceFolder}/src"
             },
-            "justMyCode": true,
+            "justMyCode": false,
             "console": "integratedTerminal",
-            "preLaunchTask": "docker:tts-stt:up"
+            "preLaunchTask": "ensure-deps"
         },
         {
-            "name": "docker",
+            "name": "Run (web)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "e_agents.cli.main",
+            "args": ["run", "--session", "web"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "preLaunchTask": "ensure-deps"
+        },
+        {
+            "name": "Session List",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "e_agents.cli.main",
+            "args": ["session", "list"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": true,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Docker Attach",
             "type": "debugpy",
             "request": "attach",
             "connect": {

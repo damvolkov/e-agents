@@ -2,9 +2,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "docker:tts-stt:up",
+            "label": "ensure-deps",
             "type": "shell",
-            "command": "docker compose up -d tts stt",
+            "command": "make _ensure-deps",
             "options": {
                 "cwd": "${workspaceFolder}"
             },
@@ -12,6 +12,32 @@
                 "reveal": "silent",
                 "panel": "shared",
                 "showReuseMessage": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "docker:infra:up",
+            "type": "shell",
+            "command": "make infra",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "docker:infra:down",
+            "type": "shell",
+            "command": "make infra-down",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
             },
             "problemMatcher": []
         }

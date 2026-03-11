@@ -1,0 +1,5 @@
+transport: streamable-http
+url: https://api.example.com/mcp
+headers:
+  Authorization: "Bearer ${MCP_API_TOKEN}"
+  X-Project-Id: "${MCP_PROJECT_ID}"

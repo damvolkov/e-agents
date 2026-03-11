@@ -22,16 +22,17 @@ services:
     image: livekit/livekit-server:v1.9
     container_name: livekit
     hostname: livekit
-    env_file: .env
     command: --config /etc/livekit.yaml
     ports:
       - "7880:7880"
       - "7881:7881/udp"
-      - "60000-60050:60000-60050/udp"
+      - "50100-50150:50100-50150/udp"
     volumes:
       - ./docker/livekit/livekit.yaml:/etc/livekit.yaml
     environment:
-      - REDIS_ADDRESS=redis:6379
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880"]
       interval: 10s
@@ -138,7 +139,7 @@ services:
     environment:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_WS_URL=ws://livekit:7880
-      - REDIS_ADDRESS=redis:6379
+      - REDIS_URL=redis://redis:6379/0
       - STT_WS_URL=ws://stt:9090
       - TTS_BASE_URL=http://tts:8880/v1
     command: uvicorn e_agents.main:create_api_app --factory --host 0.0.0.0 --port 8000 --reload
