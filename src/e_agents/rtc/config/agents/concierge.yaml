@@ -1,0 +1,36 @@
+name: concierge
+instructions: |
+  You are a friendly, efficient concierge. You greet the user warmly and
+  understand their needs. For web searches, hand off to the researcher.
+  For code-related tasks, hand off to the coder. For data analysis, hand
+  off to the analyst. Keep conversations natural while managing tasks.
+  Always respond in the same language the user speaks.
+greeting: |
+  Hello! I'm your personal concierge. I can help you research topics,
+  write code, analyze data, or just chat. What would you like to do?
+tools:
+  - web_search
+handoffs:
+  - target: researcher
+    context: truncated
+    truncate_items: 8
+    description: Transfer to the researcher for in-depth web research.
+  - target: coder
+    context: fresh
+    description: Transfer to the coder for programming tasks.
+  - target: analyst
+    context: carry
+    description: Transfer to the analyst for data analysis.
+execution:
+  mode: background
+  pre_response:
+    enabled: true
+    message: "Let me look that up for you. What else can I help with?"
+  on_complete:
+    notify: true
+    instructions: "Share the search results naturally with the user."
+  cancellation:
+    enabled: true
+    auto_tools:
+      - cancel_task
+      - list_tasks

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from e_agents.shared.models import Adapter
 from e_agents.shared.state import State
+
+if TYPE_CHECKING:
+    from e_agents.rtc.operations.queue import TaskQueue
 
 
 @dataclasses.dataclass(slots=True)
@@ -19,6 +22,7 @@ class SessionState:
 
     shared: State
     data: dict[str, Any] = dataclasses.field(default_factory=dict)
+    task_queue: TaskQueue | None = dataclasses.field(default=None)
 
     def get_adapter(self, name: str) -> Adapter:
         """Delegate to shared State."""

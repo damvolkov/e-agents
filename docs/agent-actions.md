@@ -1812,3 +1812,1204 @@ AgentServer
             ├── commit_user_turn()
             └── clear_user_turn()
 ```
+
+---
+---
+
+# Part 2 — Dynamic Agent System Design
+
+> Implementation strategy for building LiveKit agents on-the-fly from YAML configs.
+> Maps each capability to: YAML schema, build-time mechanism, and LiveKit/Python tooling.
+
+---
+
+## Current State Summary
+
+**What exists:**
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| `AgentConfig.handoffs: list[str]` | ✅ Schema exists | `models/config.py` |
+| `AgentConfig.greeting: str` | ✅ Built as dynamic `on_enter` | `operations/build.py` |
+| `AgentConfig.tools: list[str]` | ✅ Resolved from scanned modules | `operations/load.py` |
+| `AgentConfig.mcp_servers: list[str]` | ✅ Resolved from YAML configs | `operations/build.py` |
+| `Builder._bd_build_handoff()` | ✅ Creates `function_tool` per target | `operations/build.py` |
+| `Builder._bd_agent_class()` | ✅ Dynamic subclass with `on_enter` | `operations/build.py` |
+| `SessionState.data: dict[str, Any]` | ✅ Dynamic state keys from config | `models/state.py` |
+| Handoff target validation | ❌ Missing — not checked in loader | — |
+| Background task execution | ❌ Not implemented | — |
+| Pre-response / filler | ❌ Not implemented | — |
+| Task queue / priorities | ❌ Not implemented | — |
+| Interruption / cancellation | ❌ Not implemented | — |
+| State-reactive agent loop | ❌ Not implemented | — |
+
+---
+
+## F1. Handoff System — Validation & Build Order
+
+### F1.1 — Current YAML (already works)
+
+```yaml
+# config/agents/assistant.yaml
+name: assistant
+instructions: |
+  You are a helpful assistant.
+greeting: Hello! How can I help?
+tools:
+  - web_search
+handoffs:
+  - web_scraper
+  - researcher
+```
+
+Multiple handoffs per agent is fully supported — LiveKit treats each handoff as a
+separate `@function_tool` that returns an `Agent`. The LLM sees N transfer tools and
+chooses which one to call based on the conversation. **No change needed in schema.**
+
+### F1.2 — Validation Gap (to implement in Loader)
+
+**Problem:** If `assistant` declares `handoffs: [web_scraper]` but `web_scraper` is
+not listed in `session.agents` or doesn't have a YAML config, the build will fail
+silently or crash at runtime.
+
+**Solution:** Add cross-reference validation in `Loader._ld_load_config()`:
+
+```python
+# In Loader._ld_load_config(), after loading agents and sessions:
+for session_name, session_cfg in sessions.items():
+    declared_agents = set(session_cfg.agents)
+    for agent_name in session_cfg.agents:
+        agent_cfg = agents.get(agent_name)
+        if agent_cfg is None:
+            raise ConfigLoadError(
+                f"Session '{session_name}' references agent '{agent_name}' "
+                f"but no config found. Available: {sorted(agents)}"
+            )
+        for target in agent_cfg.handoffs:
+            if target not in declared_agents:
+                raise ConfigLoadError(
+                    f"Agent '{agent_name}' declares handoff to '{target}' "
+                    f"but '{target}' is not in session '{session_name}' agents: {session_cfg.agents}"
+                )
+            if target not in agents:
+                raise ConfigLoadError(
+                    f"Agent '{agent_name}' declares handoff to '{target}' "
+                    f"but no agent config found for '{target}'"
+                )
+```
+
+**Where:** `operations/load.py` → `Loader._ld_load_config()`, after the three `for` loops.
+
+### F1.3 — Build Order (Dependency Sorting)
+
+**Problem:** When building agents, handoff tools reference target agents that must
+also be buildable. Currently the builder creates agents on-demand inside the handoff
+tool closure, so order doesn't strictly matter at build time. The closure captures
+`builder` and `session_cfg` and calls `_bd_build_agent(target, ...)` at tool
+invocation time (runtime).
+
+**Current approach is correct** — handoff tools are closures that build target agents
+lazily at handoff time. No topological sort needed. The validation in F1.2 ensures
+all targets are valid at load time; the actual `Agent` instance is created at
+runtime when the LLM triggers the handoff tool.
+
+### F1.4 — Handoff with Context Preservation (current)
+
+The current `_bd_build_handoff` already passes `chat_ctx`:
+
+```python
+@function_tool(name=f"transfer_to_{target}", description=description)
+async def _transfer(context: RunContext[SessionState]) -> Agent:
+    current_ctx = context.session.current_agent.chat_ctx if ... else NOT_GIVEN
+    return builder._bd_build_agent(target, session_cfg, chat_ctx=current_ctx)
+```
+
+**Enhancement — configurable context mode per handoff:**
+
+```yaml
+# config/agents/assistant.yaml
+handoffs:
+  - target: web_scraper
+    context: carry          # carry | fresh | truncated
+    truncate_items: 6       # only if context: truncated
+  - target: researcher
+    context: fresh
+```
+
+This requires changing `AgentConfig.handoffs` from `list[str]` to
+`list[str | HandoffConfig]` and adjusting `_bd_build_handoff`. See F1.5.
+
+### F1.5 — HandoffConfig Model
+
+```python
+class HandoffConfig(BaseModelYAML):
+    """Per-handoff configuration."""
+    target: str
+    context: Literal["carry", "fresh", "truncated"] = "carry"
+    truncate_items: int = 6
+    description: str | None = None    # override auto-generated description
+```
+
+In `AgentConfig`:
+
+```python
+handoffs: list[str | HandoffConfig] = Field(default_factory=list)
+
+@model_validator(mode="after")
+def _normalize_handoffs(self) -> AgentConfig:
+    """Ensure handoffs is always list[HandoffConfig]."""
+    self.handoffs = [
+        HandoffConfig(target=h) if isinstance(h, str) else h
+        for h in self.handoffs
+    ]
+    return self
+```
+
+**Build-time in `_bd_build_handoff`:**
+
+```python
+def _bd_build_handoff(self, handoff: HandoffConfig, session_cfg: SessionConfig) -> FunctionTool:
+    target = handoff.target
+    ctx_mode = handoff.context
+    truncate = handoff.truncate_items
+    # ...
+
+    @function_tool(name=f"transfer_to_{target}", description=desc)
+    async def _transfer(context: RunContext[SessionState]) -> Agent:
+        match ctx_mode:
+            case "carry":
+                chat_ctx = context.session.current_agent.chat_ctx
+            case "truncated":
+                chat_ctx = context.session.current_agent.chat_ctx.copy(
+                    exclude_instructions=True,
+                    exclude_handoff=True,
+                ).truncate(max_items=truncate)
+            case "fresh":
+                chat_ctx = NOT_GIVEN
+        return builder._bd_build_agent(target, session_cfg, chat_ctx=chat_ctx)
+
+    return _transfer
+```
+
+---
+
+## F2. Background Task Execution
+
+### F2.1 — Problem Statement
+
+The front/assistant agent talks to the user. When the user requests something heavy
+(web search, analysis, report generation), the agent should:
+
+1. Acknowledge the request immediately (pre-response / filler)
+2. Launch the task in background
+3. Continue the conversation naturally
+4. When the task completes, inject results into the conversation
+
+### F2.2 — YAML Schema — Agent-Level Task Config
+
+```yaml
+# config/agents/assistant.yaml
+name: assistant
+instructions: |
+  You are a helpful assistant. When launching background tasks,
+  acknowledge the request and continue helping the user.
+greeting: Hello! How can I help?
+
+tools:
+  - web_search
+
+# NEW: background execution config
+execution:
+  mode: background            # background | blocking (default: blocking)
+  pre_response:
+    enabled: true
+    message: "On it! Let me look that up. What else can I help with?"
+    # OR use LLM-generated filler:
+    # model: "fast"           # use a fast/cheap LLM for filler
+    # prompt: "Generate a 5-10 word acknowledgment."
+  on_complete:
+    notify: true              # inject result into conversation when ready
+    instructions: "The background task completed. Share the results naturally."
+```
+
+### F2.3 — Config Model
+
+```python
+class PreResponseConfig(BaseModelYAML):
+    """Pre-response / filler message configuration."""
+    enabled: bool = False
+    message: str | None = None          # fixed text (takes priority)
+    model: str | None = None            # fast LLM model string
+    prompt: str = "Generate a brief acknowledgment in 5-10 words."
+
+class OnCompleteConfig(BaseModelYAML):
+    """Behavior when a background task completes."""
+    notify: bool = True
+    instructions: str = "Background task completed. Share the results with the user."
+
+class ExecutionConfig(BaseModelYAML):
+    """Controls how tools are executed — blocking vs background."""
+    mode: Literal["background", "blocking"] = "blocking"
+    pre_response: PreResponseConfig = Field(default_factory=PreResponseConfig)
+    on_complete: OnCompleteConfig = Field(default_factory=OnCompleteConfig)
+```
+
+In `AgentConfig`:
+
+```python
+execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+```
+
+### F2.4 — Build-Time Implementation
+
+**Native LiveKit tools used:**
+- `session.generate_reply(instructions=...)` — filler response
+- `session.say(text, add_to_chat_ctx=False)` — non-history filler
+- `asyncio.create_task()` — background execution
+- `agent.update_chat_ctx()` — inject results into context
+- `session.generate_reply()` — trigger LLM to present results
+
+**Build-time in `_bd_agent_class`:**
+
+When `execution.mode == "background"`, the dynamic Agent subclass wraps every tool
+call in a background pattern. This is done by wrapping tools at build time for the
+**launch**, and using two **complementary delivery mechanisms** for results.
+
+#### Tool Wrapping — Launch Mechanism
+
+Each tool that should run in background gets wrapped in a new function_tool that:
+1. Fires a pre-response
+2. Launches the real tool as `asyncio.create_task`
+3. Registers the task in `SessionState` (or `TaskQueue`)
+4. Returns immediately with an acknowledgment to the LLM
+
+```python
+def _bd_wrap_background_tool(
+    self,
+    tool: FunctionTool,
+    exec_cfg: ExecutionConfig,
+) -> FunctionTool:
+    """Wrap a tool for background execution with pre-response and state tracking."""
+    original_name = tool.info.name
+    pre_cfg = exec_cfg.pre_response
+    on_complete = exec_cfg.on_complete
+
+    @function_tool(name=original_name, description=tool.info.description)
+    async def _background_wrapper(context: RunContext[SessionState], **kwargs) -> str:
+        state: SessionState = context.userdata
+        task_id = f"{original_name}_{id(context)}"
+
+        # 1. Pre-response
+        if pre_cfg.enabled and pre_cfg.message:
+            context.session.say(pre_cfg.message, add_to_chat_ctx=False)
+        elif pre_cfg.enabled and pre_cfg.model:
+            context.session.generate_reply(instructions=pre_cfg.prompt)
+
+        # 2. Launch in background
+        async def _run():
+            try:
+                result = await tool.execute(context, **kwargs)
+                state.data[f"_task_{task_id}"] = {"status": "done", "result": result}
+                # 3. Proactive notification (only when safe — see delivery mechanisms)
+                if on_complete.notify:
+                    _try_proactive_notify(context.session, task_id, original_name, result, on_complete)
+            except asyncio.CancelledError:
+                state.data[f"_task_{task_id}"] = {"status": "cancelled"}
+            except Exception as exc:
+                state.data[f"_task_{task_id}"] = {"status": "error", "error": str(exc)}
+
+        task = asyncio.create_task(_run())
+        state.data[f"_task_{task_id}"] = {"status": "running", "task": task}
+
+        return f"Task '{original_name}' launched in background (id: {task_id}). Continuing conversation."
+
+    return _background_wrapper
+```
+
+#### Result Delivery — Two Complementary Mechanisms
+
+Results from background tasks need to reach the agent. Two mechanisms work
+**together**, each covering the other's blind spot:
+
+| Mechanism | When it fires | Pipeline-safe | Proactive | Latency |
+|-----------|---------------|---------------|-----------|---------|
+| **Primary: `on_user_turn_completed`** | User finishes speaking | Yes — runs between user input and LLM generation | No — requires user turn | Depends on user |
+| **Secondary: Event-driven callback** | Task completes | Conditional — only safe when agent is idle | Yes — agent speaks unprompted | Immediate |
+
+**Why `on_user_turn_completed` is the primary mechanism:**
+
+LiveKit's internal pipeline is sequential: VAD → STT → `on_user_turn_completed` →
+LLM → TTS. The hook runs at a **guaranteed safe point** — after user input is
+transcribed but before the LLM generates a response. Injecting background results
+here means:
+
+- Zero race conditions with the pipeline
+- Results are naturally woven into the LLM's next response
+- No risk of corrupting `chat_ctx` mid-generation
+- No risk of interrupting the user
+
+**Why the event-driven callback is the secondary mechanism:**
+
+If the user is silent (idle/listening), turn-based polling never fires, so results
+pile up undelivered. The callback solves this by proactively notifying — but **only
+when safe**:
+
+```python
+def _try_proactive_notify(
+    session: AgentSession,
+    task_id: str,
+    name: str,
+    result: str,
+    on_complete: OnCompleteConfig,
+) -> None:
+    """Proactively notify the agent, but only if the pipeline is idle."""
+    # Guard: only notify when the agent is NOT mid-pipeline
+    # "listening" and "idle" mean no generation in flight
+    if not hasattr(session, "agent_state") or session.agent_state not in ("idle", "listening"):
+        return  # on_user_turn_completed will pick it up on the next turn
+
+    agent = session.current_agent
+    chat_ctx = agent.chat_ctx.copy()
+    chat_ctx.add_message(
+        role="system",
+        content=f"<task_complete name='{name}'>{result}</task_complete>",
+    )
+    # These are fire-and-forget — safe because the pipeline is idle
+    asyncio.create_task(agent.update_chat_ctx(chat_ctx))
+    session.generate_reply(instructions=on_complete.instructions)
+```
+
+**What happens in each scenario:**
+
+| Scenario | Primary (turn-based) | Secondary (event-driven) |
+|----------|---------------------|-------------------------|
+| User is talking, task completes | Next `on_user_turn_completed` picks up result | Skipped — agent not idle |
+| User is silent, task completes | Waiting for user turn | Fires immediately — agent is idle |
+| Multiple tasks complete between turns | All results injected at once in next turn | Each fires independently (if idle) |
+| Task completes during LLM generation | Next turn picks it up | Skipped — agent is "thinking"/"speaking" |
+
+**`on_user_turn_completed` (primary delivery — always active):**
+
+```python
+async def on_user_turn_completed(self, turn_ctx, new_message):
+    state: SessionState = self.session.userdata
+    completed = [
+        (k, v) for k, v in state.data.items()
+        if k.startswith("_task_") and isinstance(v, dict) and v.get("status") in ("done", "error", "cancelled")
+    ]
+    for key, task_data in completed:
+        match task_data["status"]:
+            case "done":
+                turn_ctx.add_message(
+                    role="system",
+                    content=f"<task_result>{task_data['result']}</task_result>",
+                )
+            case "error":
+                turn_ctx.add_message(
+                    role="system",
+                    content=f"<task_error>{task_data['error']}</task_error>",
+                )
+            case "cancelled":
+                turn_ctx.add_message(
+                    role="system",
+                    content="<task_cancelled />",
+                )
+        del state.data[key]
+```
+
+### F2.5 — What Changes Where
+
+| File | Change |
+|------|--------|
+| `models/config.py` | Add `ExecutionConfig`, `PreResponseConfig`, `OnCompleteConfig` |
+| `models/config.py` → `AgentConfig` | Add `execution: ExecutionConfig` field |
+| `operations/build.py` → `_bd_agent_class` | Override `on_user_turn_completed` for state-reactive injection |
+| `operations/build.py` → `_bd_build_agent` | Wrap tools with `_bd_wrap_background_tool` when `execution.mode == "background"` |
+| `models/state.py` → `SessionState` | No structural change — uses existing `data: dict[str, Any]` |
+
+---
+
+## F3. Task Queue with Priorities
+
+### F3.1 — Problem Statement
+
+When multiple background tasks are launched, we need:
+- Priority ordering (urgent tasks first)
+- Named tasks (user can reference them)
+- Cancellable tasks
+- Status tracking
+- Callbacks when tasks complete
+
+### F3.2 — YAML Schema — Session-Level Queue Config
+
+```yaml
+# config/sessions/web.yaml
+name: web
+# ...existing config...
+
+task_queue:
+  enabled: true
+  max_concurrent: 3           # max parallel background tasks
+  default_priority: 5         # 1=highest, 10=lowest
+```
+
+### F3.3 — TaskQueue Implementation
+
+**Pure Python — `asyncio.PriorityQueue` + `asyncio.TaskGroup`:**
+
+```python
+@dataclasses.dataclass(order=True)
+class QueuedTask:
+    """Task entry in the priority queue."""
+    priority: int
+    task_id: str = dataclasses.field(compare=False)
+    name: str = dataclasses.field(compare=False)
+    coro: Coroutine = dataclasses.field(compare=False, repr=False)
+    cancellable: bool = dataclasses.field(default=True, compare=False)
+    _handle: asyncio.Task | None = dataclasses.field(default=None, compare=False, repr=False)
+
+
+class TaskQueue:
+    """Priority-based async task queue with cancellation support."""
+
+    __slots__ = ("_queue", "_running", "_max_concurrent", "_results", "_semaphore")
+
+    def __init__(self, max_concurrent: int = 3) -> None:
+        self._queue: asyncio.PriorityQueue[QueuedTask] = asyncio.PriorityQueue()
+        self._running: dict[str, QueuedTask] = {}
+        self._results: dict[str, dict[str, Any]] = {}
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def submit(
+        self,
+        task_id: str,
+        name: str,
+        coro: Coroutine,
+        *,
+        priority: int = 5,
+        cancellable: bool = True,
+    ) -> None:
+        """Submit a task to the queue."""
+        entry = QueuedTask(
+            priority=priority, task_id=task_id, name=name,
+            coro=coro, cancellable=cancellable,
+        )
+        self._results[task_id] = {"status": "queued", "name": name, "priority": priority}
+        await self._queue.put(entry)
+        asyncio.create_task(self._process())
+
+    async def _process(self) -> None:
+        """Process next task from queue."""
+        await self._semaphore.acquire()
+        try:
+            entry = await self._queue.get()
+            self._running[entry.task_id] = entry
+            self._results[entry.task_id]["status"] = "running"
+            entry._handle = asyncio.create_task(self._execute(entry))
+        except Exception:
+            self._semaphore.release()
+
+    async def _execute(self, entry: QueuedTask) -> None:
+        """Execute a single task and update results."""
+        try:
+            result = await entry.coro
+            self._results[entry.task_id] = {
+                "status": "done", "name": entry.name, "result": result,
+            }
+        except asyncio.CancelledError:
+            self._results[entry.task_id] = {
+                "status": "cancelled", "name": entry.name,
+            }
+        except Exception as exc:
+            self._results[entry.task_id] = {
+                "status": "error", "name": entry.name, "error": str(exc),
+            }
+        finally:
+            self._running.pop(entry.task_id, None)
+            self._semaphore.release()
+
+    async def cancel(self, task_id: str) -> bool:
+        """Cancel a running or queued task. Returns True if cancelled."""
+        if entry := self._running.get(task_id):
+            if entry.cancellable and entry._handle:
+                entry._handle.cancel()
+                return True
+        return False
+
+    async def cancel_by_name(self, name: str) -> int:
+        """Cancel all tasks matching a name. Returns count cancelled."""
+        cancelled = 0
+        for tid, entry in list(self._running.items()):
+            if entry.name == name and entry.cancellable and entry._handle:
+                entry._handle.cancel()
+                cancelled += 1
+        return cancelled
+
+    @property
+    def pending(self) -> list[dict[str, Any]]:
+        """Return status of all tasks."""
+        return [v for v in self._results.values() if v["status"] in ("queued", "running")]
+
+    @property
+    def completed(self) -> list[dict[str, Any]]:
+        """Return completed task results (pop on read)."""
+        done = [
+            (k, v) for k, v in self._results.items()
+            if v["status"] in ("done", "error", "cancelled")
+        ]
+        return [self._results.pop(k) for k, _ in done]
+```
+
+**Where:** New file `operations/queue.py`.
+
+### F3.4 — Integration with SessionState
+
+```python
+@dataclasses.dataclass(slots=True)
+class SessionState:
+    shared: State
+    data: dict[str, Any] = dataclasses.field(default_factory=dict)
+    task_queue: TaskQueue | None = dataclasses.field(default=None)
+```
+
+**Build-time in `_bd_build_session`:**
+
+```python
+if cfg.task_queue and cfg.task_queue.enabled:
+    session_state.task_queue = TaskQueue(max_concurrent=cfg.task_queue.max_concurrent)
+```
+
+---
+
+## F4. Interruption & Cancellation System
+
+### F4.1 — Problem Statement
+
+The user should be able to:
+1. Cancel a specific background task by name ("stop searching for X")
+2. Cancel all background tasks ("stop everything")
+3. Ask about running tasks ("what are you working on?")
+
+### F4.2 — YAML Schema — Agent-Level Cancellation Config
+
+```yaml
+# config/agents/assistant.yaml
+name: assistant
+
+execution:
+  mode: background
+  cancellation:
+    enabled: true
+    # The agent's instructions already cover intent detection.
+    # These tools are auto-injected at build time:
+    auto_tools:
+      - cancel_task           # cancel by name
+      - cancel_all_tasks      # cancel all
+      - list_tasks            # show running tasks
+```
+
+### F4.3 — Config Model
+
+```python
+class CancellationConfig(BaseModelYAML):
+    """Task cancellation configuration."""
+    enabled: bool = False
+    auto_tools: list[Literal["cancel_task", "cancel_all_tasks", "list_tasks"]] = Field(
+        default_factory=lambda: ["cancel_task", "cancel_all_tasks", "list_tasks"],
+    )
+```
+
+Add to `ExecutionConfig`:
+
+```python
+class ExecutionConfig(BaseModelYAML):
+    mode: Literal["background", "blocking"] = "blocking"
+    pre_response: PreResponseConfig = Field(default_factory=PreResponseConfig)
+    on_complete: OnCompleteConfig = Field(default_factory=OnCompleteConfig)
+    cancellation: CancellationConfig = Field(default_factory=CancellationConfig)
+```
+
+### F4.4 — Auto-Injected Cancellation Tools (built dynamically)
+
+```python
+def _bd_build_cancel_tools(self) -> list[FunctionTool]:
+    """Build task management tools for the front agent."""
+    tools: list[FunctionTool] = []
+
+    @function_tool(name="cancel_task", description="Cancel a specific background task by name.")
+    async def _cancel(context: RunContext[SessionState], task_name: str) -> str:
+        """Cancel a running background task.
+        Args:
+            task_name: Name of the task to cancel.
+        """
+        queue = context.userdata.task_queue
+        if queue is None:
+            return "No task queue available."
+        count = await queue.cancel_by_name(task_name)
+        return f"Cancelled {count} task(s) matching '{task_name}'." if count else f"No running task named '{task_name}'."
+    tools.append(_cancel)
+
+    @function_tool(name="cancel_all_tasks", description="Cancel all running background tasks.")
+    async def _cancel_all(context: RunContext[SessionState]) -> str:
+        """Cancel all running background tasks."""
+        queue = context.userdata.task_queue
+        if queue is None:
+            return "No task queue available."
+        cancelled = 0
+        for tid in list(queue._running):
+            if await queue.cancel(tid):
+                cancelled += 1
+        return f"Cancelled {cancelled} task(s)."
+    tools.append(_cancel_all)
+
+    @function_tool(name="list_tasks", description="List all running and queued background tasks.")
+    async def _list(context: RunContext[SessionState]) -> str:
+        """List all active background tasks with their status."""
+        queue = context.userdata.task_queue
+        if queue is None:
+            return "No task queue available."
+        tasks = queue.pending
+        if not tasks:
+            return "No tasks currently running."
+        return "\n".join(f"- {t['name']} (priority: {t['priority']}, status: {t['status']})" for t in tasks)
+    tools.append(_list)
+
+    return tools
+```
+
+**Build-time injection in `_bd_build_agent`:**
+
+```python
+if agent_cfg.execution.cancellation.enabled:
+    auto_tool_names = set(agent_cfg.execution.cancellation.auto_tools)
+    cancel_tools = self._bd_build_cancel_tools()
+    tools.extend(t for t in cancel_tools if t.info.name in auto_tool_names)
+```
+
+### F4.5 — Native LiveKit Interruption (Tool-Level)
+
+For tools that run in `blocking` mode but are long-running, LiveKit provides
+native interruption detection:
+
+```yaml
+# config/agents/researcher.yaml
+name: researcher
+tools:
+  - web_search:
+      interruptible: true     # use speech_handle.wait_if_not_interrupted
+  - analyze_data:
+      interruptible: false    # use context.disallow_interruptions()
+```
+
+**Build-time tool wrapper:**
+
+```python
+def _bd_wrap_interruptible_tool(self, tool: FunctionTool, interruptible: bool) -> FunctionTool:
+    """Wrap tool with LiveKit-native interruption handling."""
+    @function_tool(name=tool.info.name, description=tool.info.description)
+    async def _wrapper(context: RunContext[SessionState], **kwargs) -> str | None:
+        if not interruptible:
+            context.disallow_interruptions()
+            return await tool.execute(context, **kwargs)
+
+        future = asyncio.ensure_future(tool.execute(context, **kwargs))
+        await context.speech_handle.wait_if_not_interrupted([future])
+
+        if context.speech_handle.interrupted:
+            future.cancel()
+            return None
+        return future.result()
+
+    return _wrapper
+```
+
+---
+
+## F5. State-Reactive Agent Pattern
+
+### F5.1 — Problem Statement
+
+The front agent needs to monitor `SessionState` for changes made by background tasks
+and react accordingly — injecting results into the conversation when they arrive.
+
+### F5.2 — Dual Delivery Architecture (Recommended)
+
+Two complementary mechanisms work together. This is the same architecture described
+in F2.4 — here we show the full dynamic Agent class that implements both.
+
+| Mechanism | Role | Pipeline-safe | Proactive | When |
+|-----------|------|---------------|-----------|------|
+| Event-driven callback | **Recommended** — proactive delivery | Conditional (idle-only) | Yes | Task completion |
+| `on_user_turn_completed` | **Fallback** — guaranteed safe delivery | Yes | No | Every user turn |
+
+**The event-driven approach is recommended** because it produces the most natural,
+human-like behavior: when a task completes, the agent proactively shares results —
+just like a human colleague would say "by the way, I found that thing you asked about."
+
+The key concern — pipeline safety — is addressed by guarding on `agent_state`.
+The callback only fires `generate_reply` when the agent is `"idle"` or `"listening"`,
+meaning the pipeline is not mid-cycle. If the agent is currently speaking, the
+callback waits — the result stays in state and either:
+
+- The event-driven callback fires once the agent returns to idle, or
+- `on_user_turn_completed` picks it up on the next user turn (fallback).
+
+**Why not just event-driven?** `update_chat_ctx()` + `generate_reply()` from a
+background `asyncio.Task` is **unsafe** if the pipeline is mid-cycle (e.g. the LLM
+is generating, TTS is synthesizing, or the user is speaking). Mutating `chat_ctx`
+concurrently can corrupt state or cause interleaving. The idle guard prevents this,
+but if timing is unlucky, the fallback catches it.
+
+**Why not just turn-based?** If the user is silent, results accumulate without being
+delivered. The user might wait 30 seconds for a result that's been ready for 25.
+
+**Both together:** event-driven handles the common case proactively, turn-based acts
+as a safety net for edge cases where the event-driven guard was too conservative.
+
+### F5.3 — Dynamic Agent Class with Background Awareness
+
+```python
+@staticmethod
+def _bd_agent_class(name: str, cfg: AgentConfig) -> type[Agent]:
+    """Build dynamic Agent subclass with all configured lifecycle hooks."""
+    greeting = cfg.greeting
+    exec_cfg = cfg.execution
+    has_background = exec_cfg.mode == "background"
+
+    class _ConfiguredAgent(Agent):
+
+        async def on_enter(self) -> None:
+            if greeting:
+                await self.session.generate_reply(instructions=greeting)
+
+        async def on_user_turn_completed(self, turn_ctx, new_message):
+            # PRIMARY: inject completed background task results (pipeline-safe)
+            if has_background:
+                queue: TaskQueue | None = self.session.userdata.task_queue
+                if queue:
+                    for result in queue.completed:
+                        match result["status"]:
+                            case "done":
+                                turn_ctx.add_message(
+                                    role="system",
+                                    content=f"<task_result name='{result['name']}'>"
+                                            f"{result['result']}</task_result>",
+                                )
+                            case "error":
+                                turn_ctx.add_message(
+                                    role="system",
+                                    content=f"<task_error name='{result['name']}'>"
+                                            f"{result['error']}</task_error>",
+                                )
+                            case "cancelled":
+                                turn_ctx.add_message(
+                                    role="system",
+                                    content=f"<task_cancelled name='{result['name']}' />",
+                                )
+
+            # Block empty turns
+            if not new_message.text_content:
+                raise StopResponse()
+
+    _ConfiguredAgent.__name__ = _ConfiguredAgent.__qualname__ = f"Agent_{name}"
+    return _ConfiguredAgent
+```
+
+### F5.4 — Event-Driven Proactive Notification (Secondary)
+
+The background task callback in `_bd_wrap_background_tool` (F2.4) calls
+`_try_proactive_notify`, which guards against concurrent pipeline mutation:
+
+```python
+def _try_proactive_notify(session, task_id, name, result, on_complete):
+    """Proactively notify ONLY if pipeline is idle — otherwise let turn-based handle it."""
+    if not hasattr(session, "agent_state") or session.agent_state not in ("idle", "listening"):
+        return  # on_user_turn_completed picks it up safely on the next turn
+
+    agent = session.current_agent
+    chat_ctx = agent.chat_ctx.copy()
+    chat_ctx.add_message(
+        role="system",
+        content=f"<task_complete name='{name}'>{result}</task_complete>",
+    )
+    asyncio.create_task(agent.update_chat_ctx(chat_ctx))
+    session.generate_reply(instructions=on_complete.instructions)
+```
+
+### F5.5 — Flow Diagram
+
+```
+Background task completes
+│
+├─ Is agent idle/listening?
+│  ├─ YES → SECONDARY: update_chat_ctx + generate_reply (proactive)
+│  │        Result delivered immediately. Agent speaks unprompted.
+│  │
+│  └─ NO  → Result stays in state.data / TaskQueue
+│           ↓
+│           User speaks → on_user_turn_completed fires
+│           ↓
+│           PRIMARY: inject result into turn_ctx
+│           ↓
+│           LLM generates response that includes the result
+```
+
+This dual-delivery pattern gives the most natural experience: the agent shares
+results proactively when the user is waiting, and weaves them into conversation
+naturally when the user is active.
+
+---
+
+## F6. Pre-Response System
+
+### F6.1 — Three Pre-Response Modes
+
+| Mode | Source | Use case |
+|------|--------|----------|
+| Fixed text | `pre_response.message` | Simple acknowledgment |
+| Fast LLM | `pre_response.model` + `prompt` | Context-aware filler |
+| Silence | `pre_response.enabled: false` | No acknowledgment |
+
+### F6.2 — Build-Time: Fixed Text Pre-Response
+
+```python
+if pre_cfg.enabled and pre_cfg.message:
+    context.session.say(pre_cfg.message, add_to_chat_ctx=False)
+```
+
+### F6.3 — Build-Time: Fast LLM Pre-Response
+
+Uses the same pattern as the `fast-preresponse` example:
+
+```python
+if pre_cfg.enabled and pre_cfg.model:
+    fast_llm = inference.LLM(pre_cfg.model)
+    fast_ctx = context.session.current_agent.chat_ctx.copy(
+        exclude_instructions=True,
+        exclude_function_call=True,
+    ).truncate(max_items=3)
+    fast_ctx.items.insert(0, ChatMessage(role="system", content=[pre_cfg.prompt]))
+
+    context.session.say(
+        fast_llm.chat(chat_ctx=fast_ctx).to_str_iterable(),
+        add_to_chat_ctx=False,
+    )
+```
+
+---
+
+## F7. Per-Tool Execution Config
+
+### F7.1 — Problem Statement
+
+Not all tools should run in background. Some are quick lookups (blocking), others
+are heavy searches (background). This should be configurable per-tool.
+
+### F7.2 — YAML Schema
+
+```yaml
+# config/agents/assistant.yaml
+name: assistant
+
+tools:
+  - web_search                   # simple: uses agent-level execution.mode
+  - name: deep_research          # detailed: per-tool override
+    execution:
+      mode: background
+      priority: 2
+      cancellable: true
+      pre_response:
+        enabled: true
+        message: "Searching in depth, this may take a moment..."
+  - name: quick_lookup
+    execution:
+      mode: blocking
+      interruptible: false
+```
+
+### F7.3 — Config Model
+
+```python
+class ToolRef(BaseModelYAML):
+    """Tool reference with optional per-tool execution config."""
+    name: str
+    execution: ExecutionConfig | None = None
+    priority: int = 5
+    cancellable: bool = True
+    interruptible: bool = True
+
+# In AgentConfig:
+tools: list[str | ToolRef] = Field(default_factory=list)
+
+@model_validator(mode="after")
+def _normalize_tools(self) -> AgentConfig:
+    """Normalize tools to always be ToolRef."""
+    self.tools = [
+        ToolRef(name=t) if isinstance(t, str) else t
+        for t in self.tools
+    ]
+    return self
+```
+
+### F7.4 — Build-Time Resolution
+
+```python
+def _bd_build_agent(self, name, session_cfg, *, chat_ctx=NOT_GIVEN):
+    agent_cfg = self.config.agents[name]
+    tools = []
+
+    for tool_ref in agent_cfg.tools:
+        raw_tool = self.tools.get(tool_ref.name)
+        if raw_tool is None:
+            continue
+
+        exec_cfg = tool_ref.execution or agent_cfg.execution
+
+        match exec_cfg.mode:
+            case "background":
+                wrapped = self._bd_wrap_background_tool(raw_tool, exec_cfg, tool_ref)
+                tools.append(wrapped)
+            case "blocking" if not tool_ref.interruptible:
+                wrapped = self._bd_wrap_interruptible_tool(raw_tool, interruptible=False)
+                tools.append(wrapped)
+            case _:
+                tools.append(raw_tool)
+    # ...
+```
+
+---
+
+## F8. Complete YAML Examples
+
+### F8.1 — Session with Task Queue
+
+```yaml
+# config/sessions/research.yaml
+name: research
+stt: whisperlive
+tts: kokoro
+vad: silero
+llm:
+  provider: google
+  model: gemini-2.0-flash
+
+max_tool_steps: 10
+allow_interruptions: true
+preemptive_generation: true
+
+task_queue:
+  enabled: true
+  max_concurrent: 3
+  default_priority: 5
+
+dispatcher: assistant
+agents:
+  - assistant
+  - researcher
+  - analyst
+
+state:
+  - user_name
+  - conversation_topic
+  - research_results
+```
+
+### F8.2 — Front Agent with Background Execution
+
+```yaml
+# config/agents/assistant.yaml
+name: assistant
+instructions: |
+  You are a research assistant. You can search the web directly for
+  quick queries, or hand off complex research to specialists.
+  When you launch background tasks, continue chatting naturally.
+  If a task completes while talking, share the results.
+  The user can ask you to cancel tasks or check their status.
+greeting: |
+  Hello! I'm your research assistant. I can search, analyze, and
+  research topics — even multiple things at once. What interests you?
+
+tools:
+  - name: web_search
+    execution:
+      mode: background
+      priority: 3
+      cancellable: true
+      pre_response:
+        enabled: true
+        message: "Let me search that for you. Meanwhile, anything else?"
+
+execution:
+  mode: background
+  pre_response:
+    enabled: true
+    message: "Working on it! What else would you like to know?"
+  on_complete:
+    notify: true
+    instructions: "A background search just completed. Naturally share the results."
+  cancellation:
+    enabled: true
+    auto_tools:
+      - cancel_task
+      - cancel_all_tasks
+      - list_tasks
+
+handoffs:
+  - target: researcher
+    context: carry
+  - target: analyst
+    context: truncated
+    truncate_items: 10
+```
+
+### F8.3 — Specialist Agent (Blocking, No Background)
+
+```yaml
+# config/agents/researcher.yaml
+name: researcher
+instructions: |
+  You are a deep research analyst. Perform thorough multi-source
+  research. When done, transfer back to the assistant.
+tools:
+  - web_search
+  - name: deep_analysis
+    execution:
+      mode: blocking
+      interruptible: true
+
+handoffs:
+  - assistant
+```
+
+---
+
+## F9. Implementation Roadmap
+
+### Phase 1 — Handoff Validation (minimal effort)
+
+| Task | File | Effort |
+|------|------|--------|
+| Add cross-reference validation | `operations/load.py` | Small |
+| Add `HandoffConfig` model | `models/config.py` | Small |
+| Update `_bd_build_handoff` for context modes | `operations/build.py` | Small |
+
+**LiveKit tools:** None new — uses existing `function_tool`, `Agent`, `chat_ctx`.
+
+### Phase 2 — Background Execution + Pre-Response
+
+| Task | File | Effort |
+|------|------|--------|
+| Add `ExecutionConfig` + sub-models | `models/config.py` | Small |
+| Add `_bd_wrap_background_tool` | `operations/build.py` | Medium |
+| Enhance `_bd_agent_class` with `on_user_turn_completed` | `operations/build.py` | Medium |
+| Pre-response in tool wrapper | `operations/build.py` | Small |
+
+**LiveKit tools:** `session.say(add_to_chat_ctx=False)`, `session.generate_reply(instructions=...)`, `agent.update_chat_ctx()`, `StopResponse`.
+**Python tools:** `asyncio.create_task`, `asyncio.Future`.
+
+### Phase 3 — Task Queue
+
+| Task | File | Effort |
+|------|------|--------|
+| Implement `TaskQueue` | `operations/queue.py` (new) | Medium |
+| Add `TaskQueueConfig` to `SessionConfig` | `models/config.py` | Small |
+| Wire queue into `SessionState` | `models/state.py` | Small |
+| Initialize queue in `_bd_build_session` | `operations/build.py` | Small |
+
+**LiveKit tools:** None — pure Python.
+**Python tools:** `asyncio.PriorityQueue`, `asyncio.Semaphore`, `asyncio.Task`.
+
+### Phase 4 — Cancellation & Task Management
+
+| Task | File | Effort |
+|------|------|--------|
+| Add `CancellationConfig` | `models/config.py` | Small |
+| Build `_bd_build_cancel_tools` | `operations/build.py` | Medium |
+| Inject cancel tools in `_bd_build_agent` | `operations/build.py` | Small |
+
+**LiveKit tools:** `function_tool`, `RunContext`.
+**Python tools:** `asyncio.Task.cancel()`.
+
+### Phase 5 — Per-Tool Execution Config
+
+| Task | File | Effort |
+|------|------|--------|
+| Add `ToolRef` model | `models/config.py` | Small |
+| Normalize tools in `AgentConfig` validator | `models/config.py` | Small |
+| Per-tool wrapping in `_bd_build_agent` | `operations/build.py` | Medium |
+| `_bd_wrap_interruptible_tool` | `operations/build.py` | Small |
+
+**LiveKit tools:** `context.disallow_interruptions()`, `speech_handle.wait_if_not_interrupted()`.
+
+---
+
+## F10. LiveKit Native Tools Used Per Feature
+
+| Feature | LiveKit API | Python stdlib |
+|---------|-------------|---------------|
+| **Greeting** | `session.generate_reply(instructions=...)` | — |
+| **Handoffs** | `function_tool` returning `Agent` | — |
+| **Context carry** | `Agent(chat_ctx=self.chat_ctx)` | — |
+| **Context truncate** | `chat_ctx.copy(...).truncate(max_items=N)` | — |
+| **Pre-response (fixed)** | `session.say(text, add_to_chat_ctx=False)` | — |
+| **Pre-response (LLM)** | `session.say(llm.chat().to_str_iterable(), add_to_chat_ctx=False)` | — |
+| **Background exec** | `session.generate_reply()` (callback) | `asyncio.create_task` |
+| **State injection** | `agent.update_chat_ctx()` | — |
+| **Interruption detect** | `speech_handle.wait_if_not_interrupted()` | `asyncio.ensure_future` |
+| **Disallow interrupt** | `context.disallow_interruptions()` | — |
+| **Turn guardrail** | `on_user_turn_completed` + `StopResponse` | — |
+| **Task queue** | — | `asyncio.PriorityQueue`, `Semaphore` |
+| **Task cancel** | — | `asyncio.Task.cancel()` |
+| **Cancel tools** | `function_tool` (auto-injected) | — |
+| **List tasks** | `function_tool` (auto-injected) | — |
+| **Error handling** | `session.on("error")`, `ToolError` | — |
+| **Shutdown** | `session.shutdown()`, `EndCallTool` | — |
+
+---
+
+## F11. Architecture — Dynamic Build Flow
+
+```
+YAML Config Load (Loader)
+│
+├── agents/*.yaml ──→ AgentConfig (with HandoffConfig, ExecutionConfig, ToolRef)
+├── sessions/*.yaml ─→ SessionConfig (with TaskQueueConfig)
+├── mcps/*.yaml ────→ McpTransport
+└── tools/ (scan) ──→ dict[str, FunctionTool]
+│
+▼ Validation
+├── Agent exists in session.agents?
+├── Handoff targets exist?
+├── Tools exist in scanned registry?
+└── MCP configs exist?
+│
+▼ Build (Builder)
+│
+├── Build SessionState
+│   └── TaskQueue (if enabled)
+│
+├── Build AgentSession
+│   ├── Session-level tools
+│   ├── Session-level MCP servers
+│   └── Session-level interruption/turn config
+│
+└── Build Agent (per agent_cfg)
+    │
+    ├── Resolve tools
+    │   ├── Simple tool → use as-is
+    │   ├── Background tool → wrap with _bd_wrap_background_tool
+    │   └── Non-interruptible → wrap with _bd_wrap_interruptible_tool
+    │
+    ├── Build handoff tools
+    │   └── Per HandoffConfig → function_tool with context mode
+    │
+    ├── Build cancel tools (if cancellation.enabled)
+    │   └── cancel_task, cancel_all_tasks, list_tasks
+    │
+    ├── Resolve MCP servers
+    │
+    └── Build dynamic Agent subclass
+        ├── on_enter → greeting
+        ├── on_user_turn_completed → background result injection + guardrails
+        └── tools = [resolved + handoff + cancel]
+```

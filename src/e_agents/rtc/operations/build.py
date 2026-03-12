@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from livekit.agents import NOT_GIVEN, Agent, AgentSession, RunContext, function_tool
 from livekit.agents.llm import FunctionTool
+from livekit.agents.llm.tool_context import FunctionToolInfo
 
 from e_agents.rtc.core.exceptions import SessionBuildError
 from e_agents.rtc.models.config import (
     AgentConfig,
+    ExecutionConfig,
+    HandoffConfig,
     HttpTransport,
     McpTransport,
     SessionConfig,
     StdioTransport,
+    ToolRef,
 )
 from e_agents.rtc.models.state import SessionState
 from e_agents.rtc.operations.load import Loader
+from e_agents.rtc.operations.queue import TaskQueue, TaskResult
 from e_agents.rtc.operations.registry import ProviderRegistry
 from e_agents.shared.core.logger import LogIcon, logger
 from e_agents.shared.models import LLMConfig
@@ -27,7 +35,57 @@ except ImportError:
     _mcp = None
 
 if TYPE_CHECKING:
+    from e_agents.rtc.models.config import OnCompleteConfig
     from e_agents.shared.state import State
+
+
+##### PROACTIVE NOTIFICATION #####
+
+
+def _try_proactive_notify(
+    session: AgentSession[SessionState],
+    result: TaskResult,
+    on_complete: OnCompleteConfig,
+) -> None:
+    """Proactively notify the agent — only when the pipeline is idle."""
+    if not on_complete.notify:
+        return
+
+    agent_state = getattr(session, "agent_state", None)
+    if agent_state not in ("idle", "listening"):
+        return
+
+    queue = session.userdata.task_queue
+    if queue is None:
+        return
+
+    agent = session.current_agent
+    chat_ctx = agent.chat_ctx.copy()
+
+    match result.status:
+        case "done":
+            content = f"<task_complete name='{result.name}'>{result.result}</task_complete>"
+        case "error":
+            content = f"<task_error name='{result.name}'>{result.error}</task_error>"
+        case "cancelled":
+            content = f"<task_cancelled name='{result.name}'/>"
+        case _:
+            return
+
+    chat_ctx.add_message(role="system", content=content)
+    asyncio.create_task(agent.update_chat_ctx(chat_ctx))
+    asyncio.create_task(session.generate_reply(instructions=on_complete.instructions))
+    queue.mark_notified(result.task_id)
+    logger.info(
+        "proactive_notify",
+        task=result.name,
+        status=result.status,
+        icon=LogIcon.AGENT,
+        tags="BACKGROUND",
+    )
+
+
+##### BUILDER #####
 
 
 class Builder(Loader):
@@ -49,9 +107,14 @@ class Builder(Loader):
 
         logger.info("building_session", session=session_name, icon=LogIcon.PROCESSING)
 
+        task_queue: TaskQueue | None = None
+        if session_cfg.task_queue.enabled:
+            task_queue = TaskQueue(max_concurrent=session_cfg.task_queue.max_concurrent)
+
         session_state = SessionState(
             shared=state,
             data={key: None for key in session_cfg.state},
+            task_queue=task_queue,
         )
 
         agent_session = self._bd_build_session(session_cfg, session_state)
@@ -88,16 +151,22 @@ class Builder(Loader):
                 f"Agent '{name}' not found. Available: {sorted(self.config.agents)}"
             )
 
-        tools: list[Any] = [self.tools[t] for t in agent_cfg.tools if t in self.tools]
-        handoff_tools = [self._bd_build_handoff(target, session_cfg) for target in agent_cfg.handoffs]
+        tools = self._bd_resolve_tools(agent_cfg, session_cfg)
+        handoff_tools = [self._bd_build_handoff(h, session_cfg) for h in agent_cfg.handoffs]
         mcp_servers = self._bd_resolve_mcps(agent_cfg.mcp_servers)
+
+        if agent_cfg.execution.cancellation.enabled:
+            auto_names = set(agent_cfg.execution.cancellation.auto_tools)
+            cancel_tools = self._bd_build_cancel_tools()
+            tools.extend(t for t in cancel_tools if t.info.name in auto_names)
 
         llm = self._bd_resolve_llm(agent_cfg.llm)
         stt = ProviderRegistry.create_stt(agent_cfg.stt) if agent_cfg.stt else NOT_GIVEN
         tts = ProviderRegistry.create_tts(agent_cfg.tts) if agent_cfg.tts else NOT_GIVEN
         vad = NOT_GIVEN
 
-        agent_cls = self._bd_agent_class(name, agent_cfg)
+        has_queue = session_cfg.task_queue.enabled
+        agent_cls = self._bd_agent_class(name, agent_cfg, has_queue=has_queue)
         agent = agent_cls(
             instructions=agent_cfg.instructions,
             chat_ctx=chat_ctx,
@@ -118,12 +187,14 @@ class Builder(Loader):
             ),
         )
 
+        bg_count = sum(1 for ref in agent_cfg.tools if isinstance(ref, ToolRef) and ref.execution and ref.execution.mode == "background")
         logger.info(
             "agent_built",
             agent=name,
             tools=len(tools),
             handoffs=len(handoff_tools),
             mcps=len(mcp_servers),
+            background=bg_count,
             icon=LogIcon.AGENT,
         )
         if agent_cfg.greeting:
@@ -131,39 +202,228 @@ class Builder(Loader):
 
         return agent
 
+    ##### DYNAMIC AGENT CLASS #####
+
     @staticmethod
-    def _bd_agent_class(name: str, cfg: AgentConfig) -> type[Agent]:
-        """Return Agent or a dynamic subclass when lifecycle hooks are needed."""
-        if not cfg.greeting:
+    def _bd_agent_class(
+        name: str, cfg: AgentConfig, *, has_queue: bool,
+    ) -> type[Agent]:
+        """Return Agent or a dynamic subclass with lifecycle hooks."""
+        needs_subclass = bool(cfg.greeting) or has_queue
+        if not needs_subclass:
             return Agent
 
         greeting = cfg.greeting
+        on_complete_instructions = cfg.execution.on_complete.instructions
 
         class _ConfiguredAgent(Agent):
             async def on_enter(self) -> None:
-                await self.session.generate_reply(instructions=greeting)
+                if greeting:
+                    await self.session.generate_reply(instructions=greeting)
+
+            async def on_user_turn_completed(self) -> None:
+                queue: TaskQueue | None = self.session.userdata.task_queue
+                if queue is None:
+                    return
+                results = queue.drain_completed()
+                if not results:
+                    return
+
+                chat_ctx = self.chat_ctx.copy()
+                for r in results:
+                    match r.status:
+                        case "done":
+                            content = f"<task_complete name='{r.name}'>{r.result}</task_complete>"
+                        case "error":
+                            content = f"<task_error name='{r.name}'>{r.error}</task_error>"
+                        case "cancelled":
+                            content = f"<task_cancelled name='{r.name}'/>"
+                        case _:
+                            continue
+                    chat_ctx.add_message(role="system", content=content)
+
+                await self.update_chat_ctx(chat_ctx)
+                await self.session.generate_reply(instructions=on_complete_instructions)
 
         _ConfiguredAgent.__name__ = _ConfiguredAgent.__qualname__ = f"Agent_{name}"
         return _ConfiguredAgent
 
+    ##### TOOL RESOLUTION #####
+
+    def _bd_resolve_tools(
+        self,
+        agent_cfg: AgentConfig,
+        session_cfg: SessionConfig,
+    ) -> list[Any]:
+        """Resolve ToolRefs to FunctionTools, wrapping background tools."""
+        resolved: list[Any] = []
+        for ref in agent_cfg.tools:
+            if not isinstance(ref, ToolRef):
+                continue
+            tool = self.tools.get(ref.name)
+            if tool is None:
+                continue
+
+            exec_cfg = ref.execution or agent_cfg.execution
+            if exec_cfg.mode == "background" and session_cfg.task_queue.enabled:
+                resolved.append(self._bd_wrap_background(tool, ref, exec_cfg, session_cfg))
+            else:
+                resolved.append(tool)
+        return resolved
+
+    ##### BACKGROUND WRAPPING #####
+
+    @staticmethod
+    def _bd_wrap_background(
+        tool: FunctionTool,
+        ref: ToolRef,
+        exec_cfg: ExecutionConfig,
+        session_cfg: SessionConfig,
+    ) -> FunctionTool:
+        """Wrap a tool for background execution — returns immediately, runs in queue."""
+        original_fn = tool._func  # noqa: SLF001
+        pre_msg = exec_cfg.pre_response.message or f"Working on '{tool.info.name}'..."
+        on_complete = exec_cfg.on_complete
+
+        @functools.wraps(original_fn)
+        async def _background(*args: Any, **kwargs: Any) -> str:
+            context: RunContext[SessionState] = args[0]
+            queue = context.userdata.task_queue
+            if queue is None:
+                return str(await original_fn(*args, **kwargs))
+
+            task_id = uuid.uuid4().hex[:8]
+            coro = original_fn(*args, **kwargs)
+            session = context.session
+
+            def _on_done(result: TaskResult) -> None:
+                _try_proactive_notify(session, result, on_complete)
+
+            await queue.submit(
+                task_id=task_id,
+                name=tool.info.name,
+                coro=coro,
+                priority=ref.priority,
+                cancellable=ref.cancellable,
+                on_done=_on_done,
+            )
+            logger.info(
+                "background_task_submitted",
+                task_id=task_id,
+                tool=tool.info.name,
+                priority=ref.priority,
+                icon=LogIcon.PROCESSING,
+                tags="BACKGROUND",
+            )
+            return pre_msg
+
+        info = FunctionToolInfo(
+            name=tool.info.name,
+            description=tool.info.description,
+            flags=tool.info.flags,
+        )
+        return FunctionTool(_background, info)
+
+    ##### CANCEL TOOLS #####
+
+    @staticmethod
+    def _bd_build_cancel_tools() -> list[FunctionTool]:
+        """Generate task management tools (cancel, list)."""
+        tools: list[FunctionTool] = []
+
+        @function_tool(
+            name="cancel_task",
+            description="Cancel a running background task by name.",
+        )
+        async def _cancel(context: RunContext[SessionState], task_name: str) -> str:
+            """Cancel a task. Args: task_name: Name of the task to cancel."""
+            queue = context.userdata.task_queue
+            if queue is None:
+                return "No task queue available."
+            cancelled = await queue.cancel_by_name(task_name)
+            return f"Cancelled {cancelled} task(s) named '{task_name}'." if cancelled else f"No running task named '{task_name}'."
+
+        tools.append(_cancel)
+
+        @function_tool(
+            name="cancel_all_tasks",
+            description="Cancel all running background tasks.",
+        )
+        async def _cancel_all(context: RunContext[SessionState]) -> str:
+            """Cancel every cancellable background task."""
+            queue = context.userdata.task_queue
+            if queue is None:
+                return "No task queue available."
+            cancelled = await queue.cancel_all()
+            return f"Cancelled {cancelled} task(s)."
+
+        tools.append(_cancel_all)
+
+        @function_tool(
+            name="list_tasks",
+            description="List all running and queued background tasks.",
+        )
+        async def _list(context: RunContext[SessionState]) -> str:
+            """List active background tasks with status."""
+            queue = context.userdata.task_queue
+            if queue is None:
+                return "No task queue available."
+            tasks = queue.pending
+            if not tasks:
+                return "No tasks currently running."
+            return "\n".join(
+                f"- {t['name']} (priority: {t['priority']}, status: {t['status']})"
+                for t in tasks
+            )
+
+        tools.append(_list)
+        return tools
+
     ##### HANDOFF BUILDING #####
 
-    def _bd_build_handoff(self, target: str, session_cfg: SessionConfig) -> FunctionTool:
+    def _bd_build_handoff(
+        self, handoff: HandoffConfig, session_cfg: SessionConfig,
+    ) -> FunctionTool:
         """Create a function_tool that hands off to the target agent."""
         builder = self
+        target = handoff.target
+        ctx_mode = handoff.context
+        truncate = handoff.truncate_items
         target_cfg = self.config.agents.get(target)
-        description = f"Transfer conversation to {target}"
-        if target_cfg and target_cfg.instructions:
-            description = f"Transfer to {target}: {target_cfg.instructions[:80]}"
 
-        @function_tool(name=f"transfer_to_{target}", description=description)
+        desc = handoff.description or f"Transfer conversation to {target}"
+        if target_cfg and target_cfg.instructions and not handoff.description:
+            desc = f"Transfer to {target}: {target_cfg.instructions[:80]}"
+
+        @function_tool(name=f"transfer_to_{target}", description=desc)
         async def _transfer(context: RunContext[SessionState]) -> Agent:
-            current_ctx = (
-                context.session.current_agent.chat_ctx
-                if hasattr(context.session, "current_agent")
-                else NOT_GIVEN
+            match ctx_mode:
+                case "carry":
+                    chat_ctx = (
+                        context.session.current_agent.chat_ctx
+                        if hasattr(context.session, "current_agent")
+                        else NOT_GIVEN
+                    )
+                case "truncated":
+                    if hasattr(context.session, "current_agent"):
+                        chat_ctx = context.session.current_agent.chat_ctx.truncate(
+                            max_items=truncate,
+                        )
+                    else:
+                        chat_ctx = NOT_GIVEN
+                case "fresh":
+                    chat_ctx = NOT_GIVEN
+                case _:
+                    chat_ctx = NOT_GIVEN
+            logger.info(
+                "handoff_transfer",
+                source=context.session.current_agent.__class__.__name__,
+                target=target,
+                context_mode=ctx_mode,
+                icon=LogIcon.AGENT,
+                tags="HANDOFF",
             )
-            return builder._bd_build_agent(target, session_cfg, chat_ctx=current_ctx)
+            return builder._bd_build_agent(target, session_cfg, chat_ctx=chat_ctx)
 
         return _transfer
 

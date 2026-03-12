@@ -1,4 +1,4 @@
-"""Tests for Builder — agent assembly, handoffs, session state."""
+"""Tests for Builder — agent assembly, handoffs, background tools, session state."""
 
 from __future__ import annotations
 
@@ -11,10 +11,17 @@ from livekit.agents import Agent, function_tool
 from livekit.agents.llm import FunctionTool
 
 from e_agents.rtc.core.exceptions import SessionBuildError
-from e_agents.rtc.models.config import AgentConfig, SessionConfig
+from e_agents.rtc.models.config import (
+    AgentConfig,
+    ExecutionConfig,
+    HandoffConfig,
+    SessionConfig,
+    ToolRef,
+)
 from e_agents.rtc.models.state import SessionState
 from e_agents.rtc.operations.build import Builder
 from e_agents.rtc.operations.load import Config
+from e_agents.rtc.operations.queue import TaskQueue
 from e_agents.shared.models import LLMConfig
 from e_agents.shared.state import State
 
@@ -40,24 +47,24 @@ def mock_web_search() -> FunctionTool:
     @function_tool(name="web_search")
     async def _search(context: Any) -> str:
         """Search the web."""
-        return "mock"
+        return "mock result"
 
     return _search
 
 
 @pytest.fixture
 def agent_cfgs() -> dict[str, AgentConfig]:
-    """Three-agent handoff chain: assistant -> web_scraper / researcher -> assistant."""
+    """Three-agent handoff chain: assistant -> scraper / researcher -> assistant."""
     return {
         "assistant": AgentConfig.model_validate({
             "name": "assistant",
             "instructions": "Helpful assistant.",
             "greeting": "Hello! How can I help?",
             "tools": ["web_search"],
-            "handoffs": ["web_scraper", "researcher"],
+            "handoffs": ["scraper", "researcher"],
         }),
-        "web_scraper": AgentConfig.model_validate({
-            "name": "web_scraper",
+        "scraper": AgentConfig.model_validate({
+            "name": "scraper",
             "instructions": "Search specialist.",
             "tools": ["web_search"],
             "handoffs": ["assistant"],
@@ -80,8 +87,22 @@ def session_cfg() -> SessionConfig:
         "vad": "silero",
         "llm": {"provider": "google", "model": "gemini-2.0-flash"},
         "dispatcher": "assistant",
-        "agents": ["assistant", "web_scraper", "researcher"],
+        "agents": ["assistant", "scraper", "researcher"],
         "state": ["user_name", "topic"],
+    })
+
+
+@pytest.fixture
+def session_cfg_with_queue() -> SessionConfig:
+    return SessionConfig.model_validate({
+        "name": "queued",
+        "stt": "whisperlive",
+        "tts": "kokoro",
+        "vad": "silero",
+        "llm": {"provider": "google", "model": "gemini-2.0-flash"},
+        "dispatcher": "assistant",
+        "agents": ["assistant", "scraper"],
+        "task_queue": {"enabled": True, "max_concurrent": 2},
     })
 
 
@@ -106,6 +127,40 @@ def builder(
     """Builder with pre-loaded config and mocked providers."""
     b = Builder()
     b.config = Config(agents=agent_cfgs, sessions={"test": session_cfg}, mcps={})
+    b.tools = {"web_search": mock_web_search}
+    return b
+
+
+@pytest.fixture
+def builder_with_queue(
+    agent_cfgs: dict[str, AgentConfig],
+    session_cfg_with_queue: SessionConfig,
+    mock_web_search: FunctionTool,
+    mock_registry: MagicMock,
+) -> Builder:
+    """Builder with task queue enabled."""
+    bg_assistant = AgentConfig.model_validate({
+        "name": "assistant",
+        "instructions": "Helpful assistant.",
+        "greeting": "Hello!",
+        "tools": [
+            {"name": "web_search", "execution": {"mode": "background", "pre_response": {"enabled": True, "message": "Searching..."}}, "priority": 2},
+        ],
+        "handoffs": ["scraper"],
+        "execution": {
+            "mode": "background",
+            "cancellation": {"enabled": True},
+        },
+    })
+    scraper = AgentConfig.model_validate({
+        "name": "scraper",
+        "instructions": "Search specialist.",
+        "tools": ["web_search"],
+        "handoffs": ["assistant"],
+    })
+    cfgs = {"assistant": bg_assistant, "scraper": scraper}
+    b = Builder()
+    b.config = Config(agents=cfgs, sessions={"queued": session_cfg_with_queue}, mcps={})
     b.tools = {"web_search": mock_web_search}
     return b
 
@@ -138,12 +193,23 @@ async def test_session_state_adapters_delegation(shared_state: State) -> None:
     assert ss.adapters[0].name == "searxng"
 
 
+async def test_session_state_task_queue_default() -> None:
+    ss = SessionState(shared=State())
+    assert ss.task_queue is None
+
+
+async def test_session_state_task_queue_injected() -> None:
+    queue = TaskQueue(max_concurrent=2)
+    ss = SessionState(shared=State(), task_queue=queue)
+    assert ss.task_queue is queue
+
+
 ##### AGENT BUILDING #####
 
 
 async def test_builder_build_agent_creates_agent(builder: Builder) -> None:
     session_cfg = builder.config.sessions["test"]
-    agent = builder._bd_build_agent("web_scraper", session_cfg)
+    agent = builder._bd_build_agent("scraper", session_cfg)
     assert isinstance(agent, Agent)
     assert agent.instructions == "Search specialist."
 
@@ -158,13 +224,13 @@ async def test_builder_build_agent_with_greeting_creates_subclass(builder: Build
 
 async def test_builder_build_agent_without_greeting_is_plain(builder: Builder) -> None:
     session_cfg = builder.config.sessions["test"]
-    agent = builder._bd_build_agent("web_scraper", session_cfg)
+    agent = builder._bd_build_agent("scraper", session_cfg)
     assert type(agent) is Agent
 
 
 async def test_builder_build_agent_includes_tools(builder: Builder) -> None:
     session_cfg = builder.config.sessions["test"]
-    agent = builder._bd_build_agent("web_scraper", session_cfg)
+    agent = builder._bd_build_agent("scraper", session_cfg)
     tool_names = {t.info.name for t in agent.tools if hasattr(t, "info")}
     assert "web_search" in tool_names
 
@@ -173,7 +239,7 @@ async def test_builder_build_agent_includes_handoff_tools(builder: Builder) -> N
     session_cfg = builder.config.sessions["test"]
     agent = builder._bd_build_agent("assistant", session_cfg)
     tool_names = {t.info.name for t in agent.tools if hasattr(t, "info")}
-    assert "transfer_to_web_scraper" in tool_names
+    assert "transfer_to_scraper" in tool_names
     assert "transfer_to_researcher" in tool_names
 
 
@@ -183,45 +249,154 @@ async def test_builder_build_agent_raises_for_unknown(builder: Builder) -> None:
         builder._bd_build_agent("nonexistent", session_cfg)
 
 
+##### DYNAMIC AGENT CLASS #####
+
+
+async def test_builder_agent_class_plain_when_no_hooks() -> None:
+    cfg = AgentConfig.model_validate({"name": "plain", "instructions": "No greeting."})
+    cls = Builder._bd_agent_class("plain", cfg, has_queue=False)
+    assert cls is Agent
+
+
+async def test_builder_agent_class_subclass_with_greeting() -> None:
+    cfg = AgentConfig.model_validate({"name": "greeter", "greeting": "Hi!"})
+    cls = Builder._bd_agent_class("greeter", cfg, has_queue=False)
+    assert cls is not Agent
+    assert issubclass(cls, Agent)
+    assert cls.__name__ == "Agent_greeter"
+
+
+async def test_builder_agent_class_subclass_with_queue() -> None:
+    cfg = AgentConfig.model_validate({"name": "worker", "instructions": "Work."})
+    cls = Builder._bd_agent_class("worker", cfg, has_queue=True)
+    assert cls is not Agent
+    assert issubclass(cls, Agent)
+    assert hasattr(cls, "on_user_turn_completed")
+
+
 ##### HANDOFF #####
 
 
 async def test_builder_handoff_creates_function_tool(builder: Builder) -> None:
     session_cfg = builder.config.sessions["test"]
-    tool = builder._bd_build_handoff("web_scraper", session_cfg)
+    handoff = HandoffConfig(target="scraper")
+    tool = builder._bd_build_handoff(handoff, session_cfg)
     assert isinstance(tool, FunctionTool)
-    assert tool.info.name == "transfer_to_web_scraper"
+    assert tool.info.name == "transfer_to_scraper"
 
 
 async def test_builder_handoff_tool_returns_agent(builder: Builder) -> None:
     session_cfg = builder.config.sessions["test"]
-    handoff = builder._bd_build_handoff("web_scraper", session_cfg)
+    handoff = HandoffConfig(target="scraper")
+    tool = builder._bd_build_handoff(handoff, session_cfg)
 
     mock_ctx = MagicMock()
     mock_ctx.session.current_agent.chat_ctx = MagicMock()
-
-    result = await handoff(mock_ctx)
+    result = await tool(mock_ctx)
     assert isinstance(result, Agent)
     assert result.instructions == "Search specialist."
 
 
+async def test_builder_handoff_fresh_context(builder: Builder) -> None:
+    session_cfg = builder.config.sessions["test"]
+    handoff = HandoffConfig(target="scraper", context="fresh")
+    tool = builder._bd_build_handoff(handoff, session_cfg)
+
+    mock_ctx = MagicMock()
+    mock_ctx.session.current_agent.chat_ctx = MagicMock()
+    result = await tool(mock_ctx)
+    assert isinstance(result, Agent)
+
+
+async def test_builder_handoff_custom_description(builder: Builder) -> None:
+    session_cfg = builder.config.sessions["test"]
+    handoff = HandoffConfig(target="scraper", description="Custom transfer.")
+    tool = builder._bd_build_handoff(handoff, session_cfg)
+    assert "Custom transfer" in tool.info.description
+
+
 async def test_builder_handoff_chain_circular(builder: Builder) -> None:
-    """Verify assistant -> web_scraper -> assistant chain doesn't loop at build time."""
+    """Verify assistant -> scraper -> assistant chain doesn't loop at build time."""
     session_cfg = builder.config.sessions["test"]
     assistant = builder._bd_build_agent("assistant", session_cfg)
 
     handoff_names = {t.info.name for t in assistant.tools if hasattr(t, "info")}
-    assert "transfer_to_web_scraper" in handoff_names
+    assert "transfer_to_scraper" in handoff_names
 
     ws_handoff = next(
-        t for t in assistant.tools if hasattr(t, "info") and t.info.name == "transfer_to_web_scraper"
+        t for t in assistant.tools if hasattr(t, "info") and t.info.name == "transfer_to_scraper"
     )
     mock_ctx = MagicMock()
     mock_ctx.session.current_agent.chat_ctx = MagicMock()
-    web_scraper = await ws_handoff(mock_ctx)
+    scraper = await ws_handoff(mock_ctx)
 
-    ws_tool_names = {t.info.name for t in web_scraper.tools if hasattr(t, "info")}
+    ws_tool_names = {t.info.name for t in scraper.tools if hasattr(t, "info")}
     assert "transfer_to_assistant" in ws_tool_names
+
+
+##### BACKGROUND TOOLS #####
+
+
+async def test_builder_wraps_background_tool(builder_with_queue: Builder) -> None:
+    session_cfg = builder_with_queue.config.sessions["queued"]
+    agent = builder_with_queue._bd_build_agent("assistant", session_cfg)
+    tool_names = {t.info.name for t in agent.tools if hasattr(t, "info")}
+    assert "web_search" in tool_names
+
+
+async def test_builder_background_tool_returns_pre_response(builder_with_queue: Builder) -> None:
+    session_cfg = builder_with_queue.config.sessions["queued"]
+    agent = builder_with_queue._bd_build_agent("assistant", session_cfg)
+
+    bg_tool = next(t for t in agent.tools if hasattr(t, "info") and t.info.name == "web_search")
+    mock_ctx = MagicMock()
+    mock_ctx.userdata.task_queue = TaskQueue(max_concurrent=2)
+
+    result = await bg_tool(mock_ctx)
+    assert result == "Searching..."
+
+
+async def test_builder_background_tool_submits_to_queue(builder_with_queue: Builder) -> None:
+    session_cfg = builder_with_queue.config.sessions["queued"]
+    agent = builder_with_queue._bd_build_agent("assistant", session_cfg)
+
+    bg_tool = next(t for t in agent.tools if hasattr(t, "info") and t.info.name == "web_search")
+    queue = TaskQueue(max_concurrent=2)
+    mock_ctx = MagicMock()
+    mock_ctx.userdata.task_queue = queue
+
+    await bg_tool(mock_ctx)
+    assert not queue.is_empty or len(queue._completed) > 0 or len(queue._running) > 0
+
+
+##### CANCEL TOOLS #####
+
+
+async def test_builder_cancel_tools_injected(builder_with_queue: Builder) -> None:
+    session_cfg = builder_with_queue.config.sessions["queued"]
+    agent = builder_with_queue._bd_build_agent("assistant", session_cfg)
+    tool_names = {t.info.name for t in agent.tools if hasattr(t, "info")}
+    assert "cancel_task" in tool_names
+    assert "cancel_all_tasks" in tool_names
+    assert "list_tasks" in tool_names
+
+
+async def test_builder_cancel_tool_no_queue() -> None:
+    tools = Builder._bd_build_cancel_tools()
+    cancel_tool = next(t for t in tools if t.info.name == "cancel_task")
+    mock_ctx = MagicMock()
+    mock_ctx.userdata.task_queue = None
+    result = await cancel_tool(mock_ctx, task_name="test")
+    assert "No task queue" in result
+
+
+async def test_builder_list_tasks_empty() -> None:
+    tools = Builder._bd_build_cancel_tools()
+    list_tool = next(t for t in tools if t.info.name == "list_tasks")
+    mock_ctx = MagicMock()
+    mock_ctx.userdata.task_queue = TaskQueue(max_concurrent=2)
+    result = await list_tool(mock_ctx)
+    assert "No tasks" in result
 
 
 ##### SESSION BUILDING #####
@@ -242,6 +417,23 @@ async def test_builder_build_session_state_has_shared_adapters(
     agent_session, _ = builder.build("test", shared_state)
     ss: SessionState = agent_session.userdata
     assert ss.get_adapter("searxng").name == "searxng"
+
+
+async def test_builder_build_session_with_queue(
+    builder_with_queue: Builder, shared_state: State, mock_registry: MagicMock,
+) -> None:
+    agent_session, _ = builder_with_queue.build("queued", shared_state)
+    ss: SessionState = agent_session.userdata
+    assert ss.task_queue is not None
+    assert isinstance(ss.task_queue, TaskQueue)
+
+
+async def test_builder_build_session_without_queue(
+    builder: Builder, shared_state: State,
+) -> None:
+    agent_session, _ = builder.build("test", shared_state)
+    ss: SessionState = agent_session.userdata
+    assert ss.task_queue is None
 
 
 async def test_builder_build_dispatcher_is_first_agent_when_no_dispatcher(

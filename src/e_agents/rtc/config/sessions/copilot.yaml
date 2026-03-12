@@ -1,0 +1,33 @@
+name: copilot
+stt: whisperlive
+tts: kokoro
+vad: silero
+llm:
+  provider: google
+  model: gemini-2.0-flash
+llm_fast:
+  provider: google
+  model: gemini-2.0-flash-lite
+max_tool_steps: 15
+allow_interruptions: true
+min_endpointing_delay: 0.4
+max_endpointing_delay: 2.5
+min_interruption_words: 2
+false_interruption_timeout: 1.5
+resume_false_interruption: true
+task_queue:
+  enabled: true
+  max_concurrent: 4
+  default_priority: 5
+dispatcher: concierge
+agents:
+  - concierge
+  - researcher
+  - coder
+  - analyst
+state:
+  - user_name
+  - conversation_topic
+  - current_project
+  - last_search_query
+  - active_file

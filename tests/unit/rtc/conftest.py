@@ -16,15 +16,15 @@ def agent_assistant_raw() -> dict[str, Any]:
         "name": "assistant",
         "instructions": "You are a helpful personal assistant.",
         "tools": ["web_search"],
-        "handoffs": ["web_scraper"],
+        "handoffs": ["scraper"],
     }
 
 
 @pytest.fixture
-def agent_web_scraper_raw() -> dict[str, Any]:
-    """Config matching config/agents/web_scraper.yaml."""
+def agent_scraper_raw() -> dict[str, Any]:
+    """Config matching config/agents/scraper.yaml."""
     return {
-        "name": "web_scraper",
+        "name": "scraper",
         "instructions": "You are a web search specialist.",
         "tools": ["web_search"],
     }
@@ -52,6 +52,37 @@ def agent_full_raw() -> dict[str, Any]:
     }
 
 
+@pytest.fixture
+def agent_background_raw() -> dict[str, Any]:
+    """Agent with background execution and cancellation."""
+    return {
+        "name": "bg_agent",
+        "instructions": "Background worker.",
+        "tools": [
+            {"name": "web_search", "execution": {"mode": "background", "pre_response": {"enabled": True, "message": "Searching..."}}, "priority": 3},
+            "other_tool",
+        ],
+        "execution": {
+            "mode": "background",
+            "cancellation": {"enabled": True, "auto_tools": ["cancel_task", "list_tasks"]},
+        },
+    }
+
+
+@pytest.fixture
+def agent_handoff_config_raw() -> dict[str, Any]:
+    """Agent with detailed handoff configs."""
+    return {
+        "name": "router",
+        "instructions": "Route to specialists.",
+        "handoffs": [
+            {"target": "specialist_a", "context": "truncated", "truncate_items": 4},
+            {"target": "specialist_b", "context": "fresh", "description": "Send to B for analysis."},
+            "specialist_c",
+        ],
+    }
+
+
 ##### SESSION #####
 
 
@@ -69,7 +100,7 @@ def session_web_raw() -> dict[str, Any]:
         "min_endpointing_delay": 0.5,
         "max_endpointing_delay": 3.0,
         "dispatcher": "assistant",
-        "agents": ["assistant", "web_scraper"],
+        "agents": ["assistant", "scraper"],
     }
 
 
@@ -88,6 +119,7 @@ def session_full_raw() -> dict[str, Any]:
         "tts": "kokoro",
         "vad": "silero",
         "llm": {"provider": "openai", "model": "gpt-4o"},
+        "llm_fast": {"provider": "openai", "model": "gpt-4o-mini"},
         "turn_detection": "server_vad",
         "min_endpointing_delay": 0.3,
         "max_endpointing_delay": 5.0,
@@ -106,8 +138,21 @@ def session_full_raw() -> dict[str, Any]:
         "use_tts_aligned_transcript": True,
         "preemptive_generation": True,
         "ivr_detection": True,
+        "task_queue": {"enabled": True, "max_concurrent": 5, "default_priority": 3},
         "dispatcher": "main_agent",
         "agents": ["main_agent", "helper"],
+    }
+
+
+@pytest.fixture
+def session_with_queue_raw() -> dict[str, Any]:
+    """Session with task queue enabled."""
+    return {
+        "name": "queued",
+        "llm": "gpt-4o",
+        "task_queue": {"enabled": True, "max_concurrent": 2},
+        "dispatcher": "agent_a",
+        "agents": ["agent_a"],
     }
 
 

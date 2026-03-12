@@ -6,6 +6,10 @@ PROD → JSON lines (orjson) with correlation-id.
 Each service owns a base color. Pass `color_range=` (-3..+3) to shift it:
     logger.info("EVENT", icon=LogIcon.TOOL, color_range=-2)   # lighter
     logger.info("EVENT", icon=LogIcon.TOOL, color_range=2)    # darker
+
+Extra tags via `tags=` kwarg (str or list[str]):
+    logger.info("EVENT", tags="HANDOFF")                      # [SERVICE] [MODULE] [HANDOFF]
+    logger.info("EVENT", tags=["BG", "QUEUE"])                # [SERVICE] [MODULE] [BG] [QUEUE]
 """
 
 from __future__ import annotations
@@ -173,6 +177,13 @@ def extract_color_range(_: WrappedLogger, __: str, ed: EventDict) -> EventDict:
     return ed
 
 
+def inject_extra_tags(_: WrappedLogger, __: str, ed: EventDict) -> EventDict:
+    """Pop `tags` kwarg → store as internal `_tags` for rendering."""
+    if raw := ed.pop("tags", None):
+        ed["_tags"] = [raw.upper()] if isinstance(raw, str) else [t.upper() for t in raw]
+    return ed
+
+
 def drop_internal_keys(_: WrappedLogger, __: str, ed: EventDict) -> EventDict:
     """Remove _prefixed internal keys before serialization."""
     for k in [k for k in ed if k.startswith("_")]:
@@ -189,11 +200,11 @@ def add_correlation_id(_: WrappedLogger, __: str, ed: EventDict) -> EventDict:
 
 # ── Dev Renderer ──
 
-_RESERVED = frozenset({"timestamp", "level", "event", "service", "module", "_cr"})
+_RESERVED = frozenset({"timestamp", "level", "event", "service", "module", "_cr", "_tags"})
 
 
 def dev_renderer(_: WrappedLogger, __: str, ed: EventDict) -> str:
-    """Flat render: `HH:MM:SS [SERVICE] [MODULE] <indicator> EVENT extras`."""
+    """Flat render: `HH:MM:SS [SERVICE] [MODULE] [TAG...] <indicator> EVENT extras`."""
     ts = ed.get("timestamp", "")
     level = ed.get("level", "info")
     service = ed.get("service", Service.SYSTEM.value)
@@ -201,27 +212,27 @@ def dev_renderer(_: WrappedLogger, __: str, ed: EventDict) -> str:
     event = ed.get("event", "")
     cr = ed.get("_cr", 0)
 
-    # Service tag in its palette color (shifted by color_range)
     sr, sg, sb = shift_color(_SERVICE_RGB.get(service, _SERVICE_RGB[Service.SYSTEM]), cr)
     svc_tag = styled(f"[{service}]", sr, sg, sb, bold=True)
     mod_tag = styled(f"[{module}]", sr, sg, sb, dim=True)
 
-    # Level indicator (only for warning+)
+    extra_tags = ""
+    if tags := ed.get("_tags"):
+        extra_tags = " " + " ".join(styled(f"[{t}]", sr, sg, sb, dim=True) for t in tags)
+
     indicator = ""
     if (ind := _LEVEL_INDICATOR.get(level)) and (lrgb := _LEVEL_RGB.get(level)):
         indicator = f" {styled(ind, *lrgb, bold=level == 'critical')}"
 
-    # Timestamp dim
     ts_str = styled(ts, 130, 130, 130, dim=True)
 
-    # Extras: key dim, value normal
     extras = " ".join(
         f"{styled(f'{k}=', 130, 130, 130)}{v}"
         for k, v in ed.items()
         if k not in _RESERVED and v is not None
     )
 
-    return f"{ts_str} {svc_tag} {mod_tag}{indicator} {event}{f' {extras}' if extras else ''}"
+    return f"{ts_str} {svc_tag} {mod_tag}{extra_tags}{indicator} {event}{f' {extras}' if extras else ''}"
 
 
 # ── Banner ──
@@ -253,6 +264,7 @@ def setup_logging(*, debug: bool | None = None, log_level: int | None = None) ->
             additional_ignores=["e_agents.shared.core.logger"],
         ),
         resolve_tags,
+        inject_extra_tags,
         normalize_event,
         inject_icon,
         extract_color_range,

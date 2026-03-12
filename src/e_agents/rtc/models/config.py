@@ -11,6 +11,79 @@ from e_agents.rtc.core.settings import STTBackend, TTSBackend, TurnDetection, VA
 from e_agents.shared.core.settings import settings as st
 from e_agents.shared.models import BaseModelYAML, LLMConfig
 
+##### EXECUTION #####
+
+
+class PreResponseConfig(BaseModelYAML):
+    """Pre-response / filler message when a background task launches."""
+
+    enabled: bool = False
+    message: str | None = None
+    model: str | None = None
+    prompt: str = "Generate a brief acknowledgment in 5-10 words."
+
+
+class OnCompleteConfig(BaseModelYAML):
+    """Behavior when a background task completes."""
+
+    notify: bool = True
+    instructions: str = "Background task completed. Share the results with the user."
+
+
+class CancellationConfig(BaseModelYAML):
+    """Task cancellation and management tools."""
+
+    enabled: bool = False
+    auto_tools: list[Literal["cancel_task", "cancel_all_tasks", "list_tasks"]] = Field(
+        default_factory=lambda: ["cancel_task", "cancel_all_tasks", "list_tasks"],
+    )
+
+
+class ExecutionConfig(BaseModelYAML):
+    """Controls how tools are executed — blocking vs background."""
+
+    mode: Literal["background", "blocking"] = "blocking"
+    pre_response: PreResponseConfig = Field(default_factory=PreResponseConfig)
+    on_complete: OnCompleteConfig = Field(default_factory=OnCompleteConfig)
+    cancellation: CancellationConfig = Field(default_factory=CancellationConfig)
+
+
+##### HANDOFF #####
+
+
+class HandoffConfig(BaseModelYAML):
+    """Per-handoff configuration."""
+
+    target: str
+    context: Literal["carry", "fresh", "truncated"] = "carry"
+    truncate_items: int = 6
+    description: str | None = None
+
+
+##### TOOL REF #####
+
+
+class ToolRef(BaseModelYAML):
+    """Tool reference with optional per-tool execution override."""
+
+    name: str
+    execution: ExecutionConfig | None = None
+    priority: int = 5
+    cancellable: bool = True
+    interruptible: bool = True
+
+
+##### TASK QUEUE #####
+
+
+class TaskQueueConfig(BaseModelYAML):
+    """Session-level background task queue configuration."""
+
+    enabled: bool = False
+    max_concurrent: int = 3
+    default_priority: int = 5
+
+
 ##### AGENT #####
 
 
@@ -24,9 +97,11 @@ class AgentConfig(BaseModelYAML):
     )
     greeting: str = ""
 
-    tools: list[str] = Field(default_factory=list)
+    tools: list[str | ToolRef] = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)
-    handoffs: list[str] = Field(default_factory=list)
+    handoffs: list[str | HandoffConfig] = Field(default_factory=list)
+
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
 
     stt: STTBackend | None = None
     llm: str | LLMConfig | None = None
@@ -39,6 +114,23 @@ class AgentConfig(BaseModelYAML):
     max_endpointing_delay: float | None = None
     min_consecutive_speech_delay: float | None = None
     use_tts_aligned_transcript: bool | None = None
+
+    @model_validator(mode="after")
+    def _normalize_refs(self) -> AgentConfig:
+        """Normalize tools and handoffs to their typed forms."""
+        self.tools = [ToolRef(name=t) if isinstance(t, str) else t for t in self.tools]
+        self.handoffs = [HandoffConfig(target=h) if isinstance(h, str) else h for h in self.handoffs]
+        return self
+
+    @property
+    def tool_names(self) -> list[str]:
+        """Flat list of tool names for loader-level checks."""
+        return [t.name if isinstance(t, ToolRef) else t for t in self.tools]
+
+    @property
+    def handoff_targets(self) -> list[str]:
+        """Flat list of handoff target names for loader-level checks."""
+        return [h.target if isinstance(h, HandoffConfig) else h for h in self.handoffs]
 
 
 ##### SESSION #####
@@ -53,6 +145,7 @@ class SessionConfig(BaseModelYAML):
     tts: TTSBackend = TTSBackend.KOKORO
     vad: VADBackend = VADBackend.SILERO
     llm: str | LLMConfig = Field(default_factory=LLMConfig)
+    llm_fast: str | LLMConfig | None = None
 
     turn_detection: TurnDetection | None = None
     min_endpointing_delay: float = 0.5
@@ -79,15 +172,19 @@ class SessionConfig(BaseModelYAML):
     preemptive_generation: bool = False
     ivr_detection: bool = False
 
+    task_queue: TaskQueueConfig = Field(default_factory=TaskQueueConfig)
+
     dispatcher: str = ""
     agents: list[str] = Field(default_factory=list)
     state: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_dispatcher(self) -> SessionConfig:
+    def _validate_session(self) -> SessionConfig:
         if self.dispatcher and self.agents and self.dispatcher not in self.agents:
             msg = f"Dispatcher '{self.dispatcher}' not in agents: {self.agents}"
             raise ValueError(msg)
+        if self.llm_fast is None:
+            self.llm_fast = self.llm
         return self
 
 

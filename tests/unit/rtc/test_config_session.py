@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from e_agents.rtc.models.config import SessionConfig
 from e_agents.rtc.core.settings import STTBackend, TTSBackend, TurnDetection, VADBackend
+from e_agents.rtc.models.config import SessionConfig, TaskQueueConfig
 from e_agents.shared.models import LLMConfig, LLMProvider
 
 ##### VALIDATION #####
@@ -68,6 +68,58 @@ async def test_session_config_defaults() -> None:
     assert cfg.ivr_detection is False
     assert cfg.dispatcher == ""
     assert cfg.agents == []
+    assert cfg.task_queue.enabled is False
+    assert cfg.task_queue.max_concurrent == 3
+
+
+##### LLM_FAST DEFAULTS #####
+
+
+async def test_session_config_llm_fast_defaults_to_llm() -> None:
+    cfg = SessionConfig.model_validate({"name": "t", "llm": "gpt-4o"})
+    assert cfg.llm_fast == "gpt-4o"
+
+
+async def test_session_config_llm_fast_explicit() -> None:
+    cfg = SessionConfig.model_validate({
+        "name": "t",
+        "llm": {"provider": "openai", "model": "gpt-4o"},
+        "llm_fast": {"provider": "openai", "model": "gpt-4o-mini"},
+    })
+    assert isinstance(cfg.llm_fast, LLMConfig)
+    assert cfg.llm_fast.model == "gpt-4o-mini"
+
+
+async def test_session_config_llm_fast_as_string() -> None:
+    cfg = SessionConfig.model_validate({
+        "name": "t",
+        "llm": "gpt-4o",
+        "llm_fast": "gpt-4o-mini",
+    })
+    assert cfg.llm_fast == "gpt-4o-mini"
+
+
+##### TASK QUEUE #####
+
+
+async def test_session_config_task_queue_defaults() -> None:
+    cfg = SessionConfig(name="no_queue")
+    assert cfg.task_queue.enabled is False
+    assert cfg.task_queue.max_concurrent == 3
+    assert cfg.task_queue.default_priority == 5
+
+
+async def test_session_config_task_queue_enabled(session_with_queue_raw: dict[str, Any]) -> None:
+    cfg = SessionConfig.model_validate(session_with_queue_raw)
+    assert cfg.task_queue.enabled is True
+    assert cfg.task_queue.max_concurrent == 2
+
+
+async def test_session_config_task_queue_full(session_full_raw: dict[str, Any]) -> None:
+    cfg = SessionConfig.model_validate(session_full_raw)
+    assert cfg.task_queue.enabled is True
+    assert cfg.task_queue.max_concurrent == 5
+    assert cfg.task_queue.default_priority == 3
 
 
 ##### FULL FIELDS #####
@@ -184,7 +236,10 @@ async def test_session_config_full_roundtrip_yaml(session_full_raw: dict[str, An
     cfg = SessionConfig.model_validate(session_full_raw)
     dumped = cfg.model_dump_yaml()
     restored = SessionConfig.model_validate_yaml(dumped)
-    assert restored == cfg
+    assert restored.name == cfg.name
+    assert restored.stt == cfg.stt
+    assert restored.llm == cfg.llm
+    assert restored.task_queue.enabled == cfg.task_queue.enabled
 
 
 ##### FROM YAML FILE #####

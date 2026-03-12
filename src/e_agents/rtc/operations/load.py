@@ -95,7 +95,36 @@ class Loader(Scanner):
             mcps[f.stem] = transport
             logger.info("mcp_config_loaded", mcp=f.stem, transport=transport.transport, icon=LogIcon.NETWORK, color_range=-1)
 
+        self._ld_validate_refs(agents, sessions)
         self.config = Config(agents=agents, sessions=sessions, mcps=mcps)
+
+    def _ld_validate_refs(
+        self,
+        agents: dict[str, AgentConfig],
+        sessions: dict[str, SessionConfig],
+    ) -> None:
+        """Validate agent references and handoff targets within each session."""
+        for session_name, session_cfg in sessions.items():
+            declared = set(session_cfg.agents)
+            for agent_name in session_cfg.agents:
+                agent_cfg = agents.get(agent_name)
+                if agent_cfg is None:
+                    raise ConfigLoadError(
+                        f"Session '{session_name}' references agent '{agent_name}' "
+                        f"but no config found. Available: {sorted(agents)}"
+                    )
+                for target in agent_cfg.handoff_targets:
+                    if target not in declared:
+                        raise ConfigLoadError(
+                            f"Agent '{agent_name}' declares handoff to '{target}' "
+                            f"but '{target}' is not in session "
+                            f"'{session_name}' agents: {session_cfg.agents}"
+                        )
+                    if target not in agents:
+                        raise ConfigLoadError(
+                            f"Agent '{agent_name}' declares handoff to '{target}' "
+                            f"but no agent config found for '{target}'"
+                        )
 
     async def _ld_load_tools(self) -> None:
         """Scan tool modules for FunctionTool instances."""

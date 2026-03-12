@@ -173,23 +173,21 @@ console: _ensure-deps
 COMPOSE_NETWORK := e-agents_agents
 
 _ensure-deps:
-	@all_up=true; \
+	@missing=false; \
 	for pair in "$(REDIS_EXT_PORT):redis" "$(LIVEKIT_EXT_PORT):livekit" "$(STT_EXT_PORT):stt" "$(TTS_EXT_PORT):tts"; do \
 		port=$${pair%%:*}; svc=$${pair##*:}; \
 		if nc -z localhost $$port 2>/dev/null; then \
-			echo "$(GREEN)=== $$svc already running (port $$port) ===$(RESET)"; \
+			echo "$(GREEN)  ✓ $$svc (port $$port)$(RESET)"; \
 		else \
-			all_up=false; \
-			echo "$(YELLOW)=== $$svc not running (port $$port) ===$(RESET)"; \
+			missing=true; \
+			echo "$(YELLOW)  ✗ $$svc (port $$port)$(RESET)"; \
 		fi; \
 	done; \
-	if ! nc -z localhost $(LIVEKIT_EXT_PORT) 2>/dev/null; then \
-		echo "$(YELLOW)=== Starting livekit ===$(RESET)"; \
-		docker network create $(COMPOSE_NETWORK) 2>/dev/null || true; \
-		docker network connect $(COMPOSE_NETWORK) redis 2>/dev/null || true; \
-		docker compose -f $(COMPOSE_FILE) up -d --no-deps livekit; \
-	fi; \
-	if [ "$$all_up" = true ]; then \
+	if [ "$$missing" = true ]; then \
+		echo "$(YELLOW)=== Starting missing services ===$(RESET)"; \
+		docker compose -f $(COMPOSE_FILE) up -d redis livekit stt tts; \
+		echo "$(GREEN)=== Services started ===$(RESET)"; \
+	else \
 		echo "$(GREEN)=== All services running ===$(RESET)"; \
 	fi
 

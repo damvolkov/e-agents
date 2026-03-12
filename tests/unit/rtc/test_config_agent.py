@@ -8,8 +8,16 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from e_agents.rtc.models.config import AgentConfig
 from e_agents.rtc.core.settings import STTBackend, TTSBackend, TurnDetection, VADBackend
+from e_agents.rtc.models.config import (
+    AgentConfig,
+    CancellationConfig,
+    ExecutionConfig,
+    HandoffConfig,
+    OnCompleteConfig,
+    PreResponseConfig,
+    ToolRef,
+)
 from e_agents.shared.models import LLMConfig
 
 ##### VALIDATION #####
@@ -39,9 +47,50 @@ _AGENT_CASES = [
 async def test_agent_config_validates(data: dict[str, Any]) -> None:
     cfg = AgentConfig.model_validate(data)
     assert cfg.name == data["name"]
-    assert cfg.tools == data.get("tools", [])
-    assert cfg.handoffs == data.get("handoffs", [])
+    assert cfg.tool_names == data.get("tools", [])
+    assert cfg.handoff_targets == data.get("handoffs", [])
     assert cfg.mcp_servers == data.get("mcp_servers", [])
+
+
+##### NORMALIZATION #####
+
+
+async def test_agent_config_normalizes_tools_to_tool_ref() -> None:
+    cfg = AgentConfig.model_validate({"name": "n", "tools": ["web_search", "calc"]})
+    assert all(isinstance(t, ToolRef) for t in cfg.tools)
+    assert cfg.tools[0].name == "web_search"
+    assert cfg.tools[1].name == "calc"
+
+
+async def test_agent_config_normalizes_handoffs_to_handoff_config() -> None:
+    cfg = AgentConfig.model_validate({"name": "n", "handoffs": ["agent_a"]})
+    assert all(isinstance(h, HandoffConfig) for h in cfg.handoffs)
+    assert cfg.handoffs[0].target == "agent_a"
+    assert cfg.handoffs[0].context == "carry"
+
+
+async def test_agent_config_preserves_detailed_tool_ref() -> None:
+    cfg = AgentConfig.model_validate({
+        "name": "n",
+        "tools": [{"name": "search", "priority": 2, "cancellable": False}],
+    })
+    ref = cfg.tools[0]
+    assert isinstance(ref, ToolRef)
+    assert ref.name == "search"
+    assert ref.priority == 2
+    assert ref.cancellable is False
+
+
+async def test_agent_config_preserves_detailed_handoff_config() -> None:
+    cfg = AgentConfig.model_validate({
+        "name": "n",
+        "handoffs": [{"target": "helper", "context": "fresh", "description": "Go to helper."}],
+    })
+    h = cfg.handoffs[0]
+    assert isinstance(h, HandoffConfig)
+    assert h.target == "helper"
+    assert h.context == "fresh"
+    assert h.description == "Go to helper."
 
 
 ##### DEFAULTS #####
@@ -63,6 +112,8 @@ async def test_agent_config_defaults() -> None:
     assert cfg.max_endpointing_delay is None
     assert cfg.min_consecutive_speech_delay is None
     assert cfg.use_tts_aligned_transcript is None
+    assert cfg.execution.mode == "blocking"
+    assert cfg.execution.cancellation.enabled is False
 
 
 ##### FULL FIELDS #####
@@ -72,9 +123,9 @@ async def test_agent_config_full_fields(agent_full_raw: dict[str, Any]) -> None:
     cfg = AgentConfig.model_validate(agent_full_raw)
     assert cfg.name == "full_agent"
     assert cfg.instructions == "Full agent prompt."
-    assert cfg.tools == ["tool_a", "tool_b"]
+    assert cfg.tool_names == ["tool_a", "tool_b"]
     assert cfg.mcp_servers == ["context7", "filesystem"]
-    assert cfg.handoffs == ["other_agent"]
+    assert cfg.handoff_targets == ["other_agent"]
     assert cfg.stt == STTBackend.WHISPERLIVE
     assert cfg.tts == TTSBackend.KOKORO
     assert cfg.vad == VADBackend.SILERO
@@ -84,6 +135,46 @@ async def test_agent_config_full_fields(agent_full_raw: dict[str, Any]) -> None:
     assert cfg.max_endpointing_delay == 2.0
     assert cfg.min_consecutive_speech_delay == 0.5
     assert cfg.use_tts_aligned_transcript is True
+
+
+##### EXECUTION CONFIG #####
+
+
+async def test_agent_config_background_execution(agent_background_raw: dict[str, Any]) -> None:
+    cfg = AgentConfig.model_validate(agent_background_raw)
+    assert cfg.execution.mode == "background"
+    assert cfg.execution.cancellation.enabled is True
+    assert "cancel_task" in cfg.execution.cancellation.auto_tools
+    assert "list_tasks" in cfg.execution.cancellation.auto_tools
+
+    bg_tool = cfg.tools[0]
+    assert isinstance(bg_tool, ToolRef)
+    assert bg_tool.execution is not None
+    assert bg_tool.execution.mode == "background"
+    assert bg_tool.execution.pre_response.enabled is True
+    assert bg_tool.execution.pre_response.message == "Searching..."
+    assert bg_tool.priority == 3
+
+    plain_tool = cfg.tools[1]
+    assert isinstance(plain_tool, ToolRef)
+    assert plain_tool.execution is None
+    assert plain_tool.priority == 5
+
+
+##### HANDOFF CONFIG #####
+
+
+async def test_agent_config_mixed_handoffs(agent_handoff_config_raw: dict[str, Any]) -> None:
+    cfg = AgentConfig.model_validate(agent_handoff_config_raw)
+    assert len(cfg.handoffs) == 3
+    assert cfg.handoffs[0].target == "specialist_a"
+    assert cfg.handoffs[0].context == "truncated"
+    assert cfg.handoffs[0].truncate_items == 4
+    assert cfg.handoffs[1].target == "specialist_b"
+    assert cfg.handoffs[1].context == "fresh"
+    assert cfg.handoffs[1].description == "Send to B for analysis."
+    assert cfg.handoffs[2].target == "specialist_c"
+    assert cfg.handoffs[2].context == "carry"
 
 
 ##### INSTRUCTIONS ALIAS #####
@@ -154,14 +245,17 @@ async def test_agent_config_roundtrip_yaml(agent_assistant_raw: dict[str, Any]) 
     restored = AgentConfig.model_validate_yaml(dumped)
     assert restored.name == cfg.name
     assert restored.instructions == cfg.instructions
-    assert restored.tools == cfg.tools
+    assert restored.tool_names == cfg.tool_names
 
 
 async def test_agent_config_full_roundtrip_yaml(agent_full_raw: dict[str, Any]) -> None:
     cfg = AgentConfig.model_validate(agent_full_raw)
     dumped = cfg.model_dump_yaml()
     restored = AgentConfig.model_validate_yaml(dumped)
-    assert restored == cfg
+    assert restored.name == cfg.name
+    assert restored.tool_names == cfg.tool_names
+    assert restored.handoff_targets == cfg.handoff_targets
+    assert restored.stt == cfg.stt
 
 
 ##### FROM YAML FILE #####
@@ -180,8 +274,8 @@ async def test_agent_config_from_yaml_file(tmp_path: Path) -> None:
     cfg = AgentConfig.from_yaml(yaml_file)
     assert cfg.name == "file_agent"
     assert cfg.instructions == "Loaded from file."
-    assert cfg.tools == ["web_search"]
-    assert cfg.handoffs == ["other"]
+    assert cfg.tool_names == ["web_search"]
+    assert cfg.handoff_targets == ["other"]
 
 
 async def test_agent_config_from_yaml_file_prompt_alias(tmp_path: Path) -> None:
@@ -197,14 +291,58 @@ async def test_agent_config_from_yaml_file_prompt_alias(tmp_path: Path) -> None:
 async def test_agent_assistant_fixture(agent_assistant_raw: dict[str, Any]) -> None:
     cfg = AgentConfig.model_validate(agent_assistant_raw)
     assert cfg.name == "assistant"
-    assert "web_search" in cfg.tools
-    assert "web_scraper" in cfg.handoffs
+    assert "web_search" in cfg.tool_names
+    assert "scraper" in cfg.handoff_targets
 
 
-async def test_agent_web_scraper_fixture(agent_web_scraper_raw: dict[str, Any]) -> None:
-    cfg = AgentConfig.model_validate(agent_web_scraper_raw)
-    assert cfg.name == "web_scraper"
+async def test_agent_scraper_fixture(agent_scraper_raw: dict[str, Any]) -> None:
+    cfg = AgentConfig.model_validate(agent_scraper_raw)
+    assert cfg.name == "scraper"
     assert len(cfg.tools) == 1
+
+
+##### SUB-MODEL DEFAULTS #####
+
+
+async def test_pre_response_config_defaults() -> None:
+    cfg = PreResponseConfig()
+    assert cfg.enabled is False
+    assert cfg.message is None
+    assert cfg.model is None
+
+
+async def test_on_complete_config_defaults() -> None:
+    cfg = OnCompleteConfig()
+    assert cfg.notify is True
+    assert "completed" in cfg.instructions.lower()
+
+
+async def test_cancellation_config_defaults() -> None:
+    cfg = CancellationConfig()
+    assert cfg.enabled is False
+    assert len(cfg.auto_tools) == 3
+
+
+async def test_execution_config_defaults() -> None:
+    cfg = ExecutionConfig()
+    assert cfg.mode == "blocking"
+    assert cfg.pre_response.enabled is False
+    assert cfg.cancellation.enabled is False
+
+
+async def test_tool_ref_defaults() -> None:
+    ref = ToolRef(name="test_tool")
+    assert ref.priority == 5
+    assert ref.cancellable is True
+    assert ref.interruptible is True
+    assert ref.execution is None
+
+
+async def test_handoff_config_defaults() -> None:
+    h = HandoffConfig(target="other")
+    assert h.context == "carry"
+    assert h.truncate_items == 6
+    assert h.description is None
 
 
 ##### VALIDATION ERRORS #####
