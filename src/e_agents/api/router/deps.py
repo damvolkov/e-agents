@@ -14,8 +14,8 @@ async def get_livekit_api() -> AsyncGenerator[api.LiveKitAPI, None]:
     """Dependency that provides a LiveKit API client."""
     lk_api = api.LiveKitAPI(
         url=str(st.LIVEKIT_URL).replace("ws://", "http://").replace("wss://", "https://"),
-        api_key=st.LIVEKIT_API_KEY,
-        api_secret=st.LIVEKIT_API_SECRET,
+        api_key=st.LIVEKIT_API_KEY.get_secret_value(),
+        api_secret=st.LIVEKIT_API_SECRET.get_secret_value(),
     )
     try:
         yield lk_api
@@ -41,7 +41,7 @@ def generate_access_token(
     )
 
     token = (
-        api.AccessToken(api_key=st.LIVEKIT_API_KEY, api_secret=st.LIVEKIT_API_SECRET)
+        api.AccessToken(api_key=st.LIVEKIT_API_KEY.get_secret_value(), api_secret=st.LIVEKIT_API_SECRET.get_secret_value())
         .with_identity(identity)
         .with_grants(grants)
         .with_ttl(timedelta(minutes=ttl_minutes))

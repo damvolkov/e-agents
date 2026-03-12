@@ -30,7 +30,7 @@ export PYTHONPATH := $(CURDIR)/src
 
 COMPOSE_FILE := compose.yml
 
-.PHONY: help install sync lock lint format type test \
+.PHONY: help install sync lock lint format type test test-integration \
         infra infra-down build logs \
         run console join token script clean
 
@@ -69,6 +69,7 @@ help:
 	@echo "  $(GREEN)make format$(RESET)       Format code with ruff"
 	@echo "  $(GREEN)make type$(RESET)         Run type checker"
 	@echo "  $(GREEN)make test$(RESET)         Run unit tests"
+	@echo "  $(GREEN)make test-integration$(RESET) Run integration tests (requires services)"
 	@echo ""
 	@echo "$(BOLD)Cleanup:$(RESET)"
 	@echo "  $(GREEN)make clean$(RESET)        Remove cache and build artifacts"
@@ -125,8 +126,13 @@ type:
 
 test:
 	@echo "$(GREEN)=== Running unit tests ===$(RESET)"
-	@uv run pytest tests/unit -v
+	@uv run python -m pytest tests/unit -v -m 'not slow'
 	@echo "$(GREEN)=== Tests complete ===$(RESET)"
+
+test-integration: _ensure-deps
+	@echo "$(GREEN)=== Running integration tests ===$(RESET)"
+	@uv run python -m pytest tests/integration -v -m slow
+	@echo "$(GREEN)=== Integration tests complete ===$(RESET)"
 
 # -----------------------------------------------------------------------------
 # Infrastructure (Docker)
@@ -164,11 +170,11 @@ TTS_EXT_PORT    ?= 45130
 
 run: _ensure-deps
 	@echo "$(GREEN)=== Starting Agent Server (session=$(SESSION)) ===$(RESET)"
-	@uv run cli run --session $(SESSION)
+	@DEFAULT_SESSION=$(SESSION) uv run python -m e_agents.rtc.app dev
 
 console: _ensure-deps
 	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION)) ===$(RESET)"
-	@uv run cli console --session $(SESSION)
+	@DEFAULT_SESSION=$(SESSION) uv run python -m e_agents.rtc.app console
 
 COMPOSE_NETWORK := e-agents_agents
 

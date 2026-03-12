@@ -40,8 +40,8 @@ class ProviderRegistry:
         if cls._populated:
             return
 
-        cls._register_plugin(LLMProvider.OPENAI, "livekit.plugins.openai")
-        cls._register_plugin(LLMProvider.GOOGLE, "livekit.plugins.google")
+        cls._register_llm_plugin(LLMProvider.OPENAI, "livekit.plugins.openai")
+        cls._register_llm_plugin(LLMProvider.GOOGLE, "livekit.plugins.google")
         cls._register_silero()
 
         cls._populated = True
@@ -55,22 +55,16 @@ class ProviderRegistry:
         )
 
     @classmethod
-    def _register_plugin(cls, provider: LLMProvider, module_path: str) -> None:
-        """Dynamically import a plugin and register all provider classes."""
+    def _register_llm_plugin(cls, provider: LLMProvider, module_path: str) -> None:
+        """Import a LiveKit plugin and register only its LLM class."""
         try:
             mod = importlib.import_module(module_path)
         except ImportError:
             logger.warning("plugin_not_installed", provider=str(provider), icon=LogIcon.WARNING)
             return
 
-        _registry_map: dict[str, tuple[dict, type]] = {
-            "LLM": (cls._llm, LLMProvider),
-            "STT": (cls._stt, STTBackend),
-            "TTS": (cls._tts, TTSBackend),
-        }
-        for attr, (registry, enum_cls) in _registry_map.items():
-            if (provider_cls := getattr(mod, attr, None)) is not None:
-                registry[enum_cls(provider.value)] = provider_cls
+        if (llm_cls := getattr(mod, "LLM", None)) is not None:
+            cls._llm[provider] = llm_cls
 
         logger.debug("plugin_registered", provider=str(provider), icon=LogIcon.ADAPTER, color_range=1)
 
@@ -118,10 +112,21 @@ class ProviderRegistry:
 
     @staticmethod
     def create_vad(**kwargs: Any) -> Any:
-        """Instantiate the default Silero VAD."""
+        """Instantiate Silero VAD with tuned defaults from settings."""
         if _silero is None:
             raise ImportError("livekit.plugins.silero is required for VAD but not installed")
-        return _silero.VAD.load(**kwargs)
+
+        from e_agents.shared.core.settings import settings as _st
+
+        defaults: dict[str, Any] = {
+            "activation_threshold": _st.VAD_ACTIVATION_THRESHOLD,
+            "min_speech_duration": _st.VAD_MIN_SPEECH_DURATION,
+            "min_silence_duration": _st.VAD_MIN_SILENCE_DURATION,
+            "prefix_padding_duration": _st.VAD_PREFIX_PADDING_DURATION,
+            "sample_rate": _st.VAD_SAMPLE_RATE,
+        }
+        defaults.update(kwargs)
+        return _silero.VAD.load(**defaults)
 
     ##### INTROSPECTION #####
 

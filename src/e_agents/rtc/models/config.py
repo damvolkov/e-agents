@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, ConfigDict, Discriminator, Field, Tag, model_validator
+from pydantic import AliasChoices, ConfigDict, Discriminator, Field, SecretStr, Tag, model_validator
 
 from e_agents.rtc.core.settings import STTBackend, TTSBackend, TurnDetection, VADBackend
 from e_agents.shared.core.settings import settings as st
@@ -203,7 +203,7 @@ def _resolve_env_refs(mapping: dict[str, str]) -> dict[str, str]:
         if not value:
             missing.append(name)
             return m.group(0)
-        return str(value)
+        return value.get_secret_value() if isinstance(value, SecretStr) else str(value)
 
     resolved = {key: _ENV_REF.sub(_replace, val) for key, val in mapping.items()}
     if missing:

@@ -115,12 +115,15 @@ class Loader(Scanner):
                     )
                 for target in agent_cfg.handoff_targets:
                     if target not in declared:
-                        raise ConfigLoadError(
-                            f"Agent '{agent_name}' declares handoff to '{target}' "
-                            f"but '{target}' is not in session "
-                            f"'{session_name}' agents: {session_cfg.agents}"
+                        logger.warning(
+                            "handoff_target_missing_in_session",
+                            agent=agent_name,
+                            target=target,
+                            session=session_name,
+                            icon=LogIcon.WARNING,
+                            color_range=-1,
                         )
-                    if target not in agents:
+                    elif target not in agents:
                         raise ConfigLoadError(
                             f"Agent '{agent_name}' declares handoff to '{target}' "
                             f"but no agent config found for '{target}'"

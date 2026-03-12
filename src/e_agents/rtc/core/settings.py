@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum, auto
 
-from pydantic import AnyHttpUrl, AnyUrl, PostgresDsn, model_validator
+from pydantic import AnyHttpUrl, AnyUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings
 
 ##### ENUMS #####
@@ -44,7 +44,6 @@ class RTCSettings(BaseSettings):
     # STT (WhisperLive WebSocket)
     STT_WS_URL: AnyUrl = "ws://localhost:45120"
     STT_MODEL: str = "large-v3-turbo"
-    STT_LANGUAGE: str = "en"
     STT_TIMEOUT: float = 30.0
 
     # TTS (Kokoro OpenAI-compatible)
@@ -53,10 +52,9 @@ class RTCSettings(BaseSettings):
     TTS_VOICE: str = "af_heart"
 
     # LLM
-    OPENAI_API_KEY: str = ""
-    GEMINI_API_KEY: str = ""
-    GOOGLE_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    OPENAI_API_KEY: SecretStr = ""
+    GOOGLE_API_KEY: SecretStr = ""
+    GOOGLE_MODEL: str = "gemini-2.0-flash"
 
     # Audio
     AUDIO_SAMPLE_RATE: int = 24000
@@ -66,21 +64,15 @@ class RTCSettings(BaseSettings):
     AGENT_MAX_TOOL_STEPS: int = 10
 
     # MCP
-    MCP_CONTEXT7_API_KEY: str = ""
+    MCP_CONTEXT7_API_KEY: SecretStr = ""
     MCP_PG_URL: PostgresDsn | None = None
-    MCP_N8N_TOKEN: str = ""
-    MCP_API_TOKEN: str = ""
+    MCP_N8N_TOKEN: SecretStr = ""
+    MCP_API_TOKEN: SecretStr = ""
     MCP_PROJECT_ID: str = ""
 
-    # VAD
+    # VAD (Silero)
     VAD_SAMPLE_RATE: int = 16000
-    VAD_HOP_SIZE: int = 256
-    VAD_SPEECH_THRESHOLD: float = 0.5
-    VAD_SILENCE_DURATION: float = 1.5
-
-    @model_validator(mode="after")
-    def sync_google_api_key(self) -> RTCSettings:
-        """Sync GOOGLE_API_KEY from GEMINI_API_KEY if not set."""
-        if not self.GOOGLE_API_KEY and self.GEMINI_API_KEY:
-            self.GOOGLE_API_KEY = self.GEMINI_API_KEY
-        return self
+    VAD_ACTIVATION_THRESHOLD: float = 0.6
+    VAD_MIN_SPEECH_DURATION: float = 0.15
+    VAD_MIN_SILENCE_DURATION: float = 0.8
+    VAD_PREFIX_PADDING_DURATION: float = 0.4

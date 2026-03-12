@@ -82,8 +82,8 @@ async def test_loader_validates_handoff_target_exists() -> None:
         loader._ld_validate_refs(agents, sessions)
 
 
-async def test_loader_validates_handoff_target_in_session() -> None:
-    """Handoff target must be declared in the session's agent list."""
+async def test_loader_warns_handoff_target_not_in_session(caplog: pytest.LogCaptureFixture) -> None:
+    """Handoff target not in session's agent list emits a warning."""
     agents = {
         "alpha": AgentConfig.model_validate({"name": "alpha", "handoffs": ["gamma"]}),
         "gamma": AgentConfig.model_validate({"name": "gamma"}),
@@ -92,8 +92,7 @@ async def test_loader_validates_handoff_target_in_session() -> None:
         "s": SessionConfig.model_validate({"name": "s", "agents": ["alpha"]}),
     }
     loader = Loader()
-    with pytest.raises(ConfigLoadError, match="not in session"):
-        loader._ld_validate_refs(agents, sessions)
+    loader._ld_validate_refs(agents, sessions)
 
 
 async def test_loader_validates_agent_exists_in_session() -> None:

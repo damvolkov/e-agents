@@ -1,4 +1,4 @@
-"""Integration tests for WhisperLive STT adapter."""
+"""Unit tests for WhisperLive STT adapter (mocked WebSocket)."""
 
 from __future__ import annotations
 
@@ -11,29 +11,6 @@ from livekit import rtc
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
 
 from e_agents.rtc.adapters.stt import WhisperLiveSTT
-
-##### REAL SERVICE #####
-
-
-@pytest.mark.slow
-async def test_stt_recognize_real_service(sample_audio_wav: bytes) -> None:
-    """Against real WhisperLive server — requires running service."""
-    stt = WhisperLiveSTT()
-    frame = rtc.AudioFrame(
-        data=sample_audio_wav,
-        sample_rate=16000,
-        num_channels=1,
-        samples_per_channel=len(sample_audio_wav) // 2,
-    )
-
-    result = await stt._recognize_impl([frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
-
-    assert result.type.name == "FINAL_TRANSCRIPT"
-    assert len(result.alternatives) > 0
-    assert result.alternatives[0].text
-
-    await stt.aclose()
-
 
 ##### TRANSCRIPTION #####
 
@@ -65,7 +42,7 @@ async def test_stt_recognize_transcripts(
     mock_ws = mock_ws_factory(messages)
     mock_connect = mock_connect_factory(mock_ws)
 
-    with patch("e_agents.rtc.adapters.stt.websockets.connect", return_value=mock_connect):
+    with patch("e_agents.rtc.adapters.stt.whisperlive.websockets.connect", return_value=mock_connect):
         result = await stt_adapter._recognize_impl([audio_frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.type.name == "FINAL_TRANSCRIPT"
@@ -101,7 +78,7 @@ async def test_stt_recognize_language(
     mock_ws = mock_ws_factory(messages)
     mock_connect = mock_connect_factory(mock_ws)
 
-    with patch("e_agents.rtc.adapters.stt.websockets.connect", return_value=mock_connect):
+    with patch("e_agents.rtc.adapters.stt.whisperlive.websockets.connect", return_value=mock_connect):
         lang_arg = language if language else NOT_GIVEN
         result = await stt_adapter._recognize_impl(
             [audio_frame], language=lang_arg, conn_options=DEFAULT_API_CONNECT_OPTIONS
@@ -122,18 +99,18 @@ async def test_stt_recognize_language(
     ids=["turbo", "standard"],
 )
 async def test_stt_model_property(model: str, expected_model: str) -> None:
-    stt = WhisperLiveSTT(model=model)
+    adapter = WhisperLiveSTT(model=model)
 
-    assert stt.model == expected_model
-    assert stt.provider == "whisperlive"
+    assert adapter.model == expected_model
+    assert adapter.provider == "whisperlive"
 
-    await stt.aclose()
+    await adapter.aclose()
 
 
 async def test_stt_capabilities() -> None:
-    stt = WhisperLiveSTT()
+    adapter = WhisperLiveSTT()
 
-    assert stt.capabilities.streaming is False
-    assert stt.capabilities.interim_results is False
+    assert adapter.capabilities.streaming is True
+    assert adapter.capabilities.interim_results is True
 
-    await stt.aclose()
+    await adapter.aclose()

@@ -1,4 +1,4 @@
-"""Integration tests for Kokoro TTS adapter via OpenAI-compatible API."""
+"""Unit tests for Kokoro TTS adapter (mocked HTTP)."""
 
 from __future__ import annotations
 
@@ -58,12 +58,7 @@ async def test_tts_audio_properties(sample_rate: int, num_channels: int) -> None
 
 @pytest.mark.parametrize(
     "text",
-    [
-        "Hello world",
-        "Test with numbers 123",
-        "Special chars: !@#$%",
-        "",
-    ],
+    ["Hello world", "Test with numbers 123", "Special chars: !@#$%", ""],
     ids=["simple", "numbers", "special", "empty"],
 )
 async def test_synthesize_returns_stream(tts_adapter: KokoroTTS, text: str) -> None:
@@ -95,7 +90,7 @@ async def test_synthesize_stream_with_mock(
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("e_agents.rtc.adapters.tts.httpx.AsyncClient", return_value=mock_client):
+    with patch("e_agents.rtc.adapters.tts.kokoro.httpx.AsyncClient", return_value=mock_client):
         stream = tts_adapter.synthesize("Hello world")
 
         chunks_received = []

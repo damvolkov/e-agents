@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 import git
-from pydantic import AnyHttpUrl, AnyUrl, RedisDsn, computed_field
+from pydantic import AnyHttpUrl, AnyUrl, RedisDsn, SecretStr, computed_field
 from pydantic_settings import SettingsConfigDict
 
 from e_agents.api.core.settings import APISettings
@@ -52,11 +52,15 @@ class Settings(RTCSettings, APISettings, CLISettings):
     AGENTS_DIR: ClassVar[Path] = CONFIG_DIR / "agents"
     SESSIONS_DIR: ClassVar[Path] = CONFIG_DIR / "sessions"
     MCPS_DIR: ClassVar[Path] = CONFIG_DIR / "mcps"
-    DEFAULT_SESSION: ClassVar[str] = "web"
+    DEFAULT_SESSION: str = "web"
 
     TOOLS_DIR: ClassVar[Path] = BASE_DIR / "src" / "e_agents" / "rtc" / "tools"
     DATA_PATH: ClassVar[Path] = BASE_DIR / "data"
     MODELS_PATH: ClassVar[Path] = DATA_PATH / "models"
+
+    ##### LANGUAGE #####
+
+    USER_LANGUAGE: str = "en"
 
     ##### SHARED INFRASTRUCTURE #####
 
@@ -66,8 +70,8 @@ class Settings(RTCSettings, APISettings, CLISettings):
     # LiveKit (used by api, cli, and rtc)
     LIVEKIT_URL: AnyUrl = "ws://localhost:7880"
     LIVEKIT_WS_URL: AnyUrl = "ws://localhost:7880"
-    LIVEKIT_API_KEY: str = "devkey"
-    LIVEKIT_API_SECRET: str = "secret"
+    LIVEKIT_API_KEY: SecretStr = "devkey"
+    LIVEKIT_API_SECRET: SecretStr = "secret"
 
     # Adapters
     ADAPTERS_TIMEOUT: float = 15.0

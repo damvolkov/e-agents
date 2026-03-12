@@ -1,4 +1,6 @@
-"""Integration test fixtures."""
+"""Integration test fixtures — real services via settings."""
+
+from __future__ import annotations
 
 import struct
 from collections.abc import AsyncIterator
@@ -10,61 +12,43 @@ from livekit import rtc
 from e_agents.rtc.adapters.stt import WhisperLiveSTT
 from e_agents.rtc.adapters.tts import KokoroTTS
 
+_RESOURCES = Path(__file__).parent.parent / "resources"
+
 
 @pytest.fixture
 def resources_path() -> Path:
-    """Path to test resources directory."""
-    return Path(__file__).parent.parent / "resources"
-
-
-@pytest.fixture
-def sample_audio_mp3(resources_path: Path) -> bytes:
-    """Load sample English MP3 audio."""
-    return (resources_path / "sample_english.mp3").read_bytes()
+    return _RESOURCES
 
 
 @pytest.fixture
 def sample_audio_wav(resources_path: Path) -> bytes:
-    """Load sample English WAV audio."""
+    """Real WAV audio for STT integration."""
     return (resources_path / "sample_english2.wav").read_bytes()
 
 
 @pytest.fixture
-def sample_pcm() -> bytes:
-    """Generate silent PCM audio for testing."""
-    return b"\x00\x00" * 1600
+def sample_audio_mp3(resources_path: Path) -> bytes:
+    """Real MP3 audio for STT integration."""
+    return (resources_path / "sample_english.mp3").read_bytes()
 
 
 @pytest.fixture
-def audio_frame(sample_pcm: bytes) -> rtc.AudioFrame:
-    """Create a test audio frame."""
-    return rtc.AudioFrame(
-        data=sample_pcm,
-        sample_rate=16000,
-        num_channels=1,
-        samples_per_channel=1600,
-    )
+def sample_pcm_frame() -> rtc.AudioFrame:
+    """Minimal silent PCM frame for connectivity tests."""
+    pcm = b"\x00\x00" * 1600
+    return rtc.AudioFrame(data=pcm, sample_rate=16000, num_channels=1, samples_per_channel=1600)
 
 
 @pytest.fixture
 def sample_wav_bytes() -> bytes:
-    """Generate minimal valid WAV for testing."""
-    sample_rate = 24000
-    channels = 1
-    bits_per_sample = 16
-    data_size = 4800
+    """Minimal valid WAV for testing."""
+    sample_rate, channels, bps, data_size = 24000, 1, 16, 4800
 
     header = b"RIFF"
     header += struct.pack("<I", 36 + data_size)
     header += b"WAVE"
     header += b"fmt "
-    header += struct.pack("<I", 16)
-    header += struct.pack("<H", 1)
-    header += struct.pack("<H", channels)
-    header += struct.pack("<I", sample_rate)
-    header += struct.pack("<I", sample_rate * channels * bits_per_sample // 8)
-    header += struct.pack("<H", channels * bits_per_sample // 8)
-    header += struct.pack("<H", bits_per_sample)
+    header += struct.pack("<IHHIIHH", 16, 1, channels, sample_rate, sample_rate * channels * bps // 8, channels * bps // 8, bps)
     header += b"data"
     header += struct.pack("<I", data_size)
     header += b"\x00" * data_size
@@ -72,17 +56,20 @@ def sample_wav_bytes() -> bytes:
     return header
 
 
+##### ADAPTERS — REAL SERVICES #####
+
+
 @pytest.fixture
 async def stt_adapter() -> AsyncIterator[WhisperLiveSTT]:
-    """Create STT adapter with automatic cleanup."""
-    adapter = WhisperLiveSTT(ws_url="ws://test-stt:9090")
+    """WhisperLiveSTT pointing to real local service."""
+    adapter = WhisperLiveSTT()
     yield adapter
     await adapter.aclose()
 
 
 @pytest.fixture
 async def tts_adapter() -> AsyncIterator[KokoroTTS]:
-    """Create TTS adapter with automatic cleanup."""
-    adapter = KokoroTTS(base_url="http://test-tts:8880/v1")
+    """KokoroTTS pointing to real local service."""
+    adapter = KokoroTTS()
     yield adapter
     await adapter.aclose()

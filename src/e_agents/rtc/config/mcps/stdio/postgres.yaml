@@ -1,7 +1,0 @@
-transport: stdio
-command: npx
-args:
-  - "-y"
-  - "@modelcontextprotocol/server-postgres"
-env:
-  PG_CONNECTION_STRING: "${MCP_PG_URL}"

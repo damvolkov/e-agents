@@ -72,6 +72,8 @@ dev = [
     "pytest-httpserver>=1.1.5",
     "pytest-cover>=3.0.0",
     "pytest-coverage>=0.0",
+    "jiwer>=4.0.0",
+    "pesq>=0.0.4",
 ]
 
 [tool.hatch.version]
@@ -95,8 +97,8 @@ console = "python -m e_agents.main lk console"
 lint = "ruff check --fix ."
 format = "ruff format ."
 typecheck = "ty typecheck"
-test = "python -m pytest tests/unit -v --cov --cov-report=term-missing"
-test-integration = "python -m pytest tests/integration -v"
+test = "python -m pytest tests/unit -v -m 'not slow' --cov --cov-report=term-missing"
+test-integration = "python -m pytest tests/integration -v -m slow"
 
 [tool.pytest.ini_options]
 env_files = [".env"]
@@ -105,7 +107,7 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
-addopts = "-m 'not slow'"
+addopts = "--import-mode=importlib"
 
 [tool.ruff]
 line-length = 120

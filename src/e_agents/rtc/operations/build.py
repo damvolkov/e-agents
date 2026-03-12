@@ -27,6 +27,7 @@ from e_agents.rtc.operations.load import Loader
 from e_agents.rtc.operations.queue import TaskQueue, TaskResult
 from e_agents.rtc.operations.registry import ProviderRegistry
 from e_agents.shared.core.logger import LogIcon, logger
+from e_agents.shared.core.settings import settings as st
 from e_agents.shared.models import LLMConfig
 
 try:
@@ -37,6 +38,22 @@ except ImportError:
 if TYPE_CHECKING:
     from e_agents.rtc.models.config import OnCompleteConfig
     from e_agents.shared.state import State
+
+_LANG_NAMES: dict[str, str] = {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "pt": "Portuguese",
+    "it": "Italian",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+    "ar": "Arabic",
+    "ru": "Russian",
+    "nl": "Dutch",
+    "ca": "Catalan",
+}
 
 
 ##### PROACTIVE NOTIFICATION #####
@@ -213,7 +230,13 @@ class Builder(Loader):
         if not needs_subclass:
             return Agent
 
-        greeting = cfg.greeting
+        raw_greeting = cfg.greeting
+        lang = st.USER_LANGUAGE
+        greeting = (
+            f"You MUST respond in {_LANG_NAMES.get(lang, lang)}. {raw_greeting}"
+            if raw_greeting and lang != "en"
+            else raw_greeting
+        )
         on_complete_instructions = cfg.execution.on_complete.instructions
 
         class _ConfiguredAgent(Agent):
@@ -221,7 +244,9 @@ class Builder(Loader):
                 if greeting:
                     await self.session.generate_reply(instructions=greeting)
 
-            async def on_user_turn_completed(self) -> None:
+            async def on_user_turn_completed(
+                self, turn_ctx: Any, new_message: Any = None,
+            ) -> None:
                 queue: TaskQueue | None = self.session.userdata.task_queue
                 if queue is None:
                     return
@@ -229,7 +254,6 @@ class Builder(Loader):
                 if not results:
                     return
 
-                chat_ctx = self.chat_ctx.copy()
                 for r in results:
                     match r.status:
                         case "done":
@@ -240,9 +264,8 @@ class Builder(Loader):
                             content = f"<task_cancelled name='{r.name}'/>"
                         case _:
                             continue
-                    chat_ctx.add_message(role="system", content=content)
+                    turn_ctx.add_message(role="system", content=content)
 
-                await self.update_chat_ctx(chat_ctx)
                 await self.session.generate_reply(instructions=on_complete_instructions)
 
         _ConfiguredAgent.__name__ = _ConfiguredAgent.__qualname__ = f"Agent_{name}"
@@ -468,15 +491,16 @@ class Builder(Loader):
 
     ##### RESOLVERS #####
 
-    def _bd_resolve_llm(self, cfg: str | LLMConfig | None) -> Any:
-        """Resolve LLM config to a model string or NOT_GIVEN."""
+    @staticmethod
+    def _bd_resolve_llm(cfg: str | LLMConfig | None) -> Any:
+        """Resolve LLM config to a plugin instance or NOT_GIVEN."""
         match cfg:
             case None:
                 return NOT_GIVEN
             case str():
                 return cfg
             case LLMConfig():
-                return f"{cfg.provider}/{cfg.model}"
+                return ProviderRegistry.create_llm(cfg.provider, model=cfg.model)
 
     def _bd_resolve_mcps(self, names: list[str]) -> list[Any]:
         """Convert MCP config names to livekit MCPServer instances."""

@@ -469,11 +469,11 @@ async def test_builder_resolve_llm(
     builder: Builder, llm_input: Any, expect_not_given: bool,
 ) -> None:
     cfg = LLMConfig.model_validate(llm_input) if isinstance(llm_input, dict) else llm_input
-    result = builder._bd_resolve_llm(cfg)
+    result = Builder._bd_resolve_llm(cfg)
 
     if expect_not_given:
         assert result is _NG
     elif isinstance(llm_input, str):
         assert result == llm_input
     else:
-        assert result == "google/gemini-2.0-flash"
+        assert hasattr(result, "chat"), "LLMConfig should return an LLM plugin instance"
