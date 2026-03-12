@@ -1,11 +1,15 @@
 """TTS adapter for Kokoro via OpenAI-compatible API."""
 
+import re
+
 import httpx
 from livekit.agents import tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 from livekit.agents.utils import shortuuid
 
 from e_agents.shared.core.settings import settings as st
+
+_HAS_SPEAKABLE = re.compile(r"[a-zA-Z\u00C0-\u024F\u0400-\u04FF\u0600-\u06FF\u4E00-\u9FFF]")
 
 
 class KokoroChunkedStream(tts.ChunkedStream):
@@ -30,6 +34,11 @@ class KokoroChunkedStream(tts.ChunkedStream):
             num_channels=tts_instance.num_channels,
             mime_type="audio/pcm",
         )
+
+        if not _HAS_SPEAKABLE.search(self._input_text):
+            _silence = b"\x00" * (tts_instance.sample_rate * tts_instance.num_channels * 2 // 100)
+            output_emitter.push(_silence)
+            return
 
         async with (
             httpx.AsyncClient(

@@ -11,6 +11,7 @@ from livekit.agents import NOT_GIVEN, Agent, AgentSession, RunContext, function_
 from livekit.agents.llm import FunctionTool
 from livekit.agents.llm.tool_context import FunctionToolInfo
 
+from e_agents.rtc.adapters.stt.whisperlive import set_agent_speaking
 from e_agents.rtc.core.exceptions import SessionBuildError
 from e_agents.rtc.models.config import (
     AgentConfig,
@@ -130,11 +131,12 @@ class Builder(Loader):
 
         session_state = SessionState(
             shared=state,
-            data={key: None for key in session_cfg.state},
+            data=dict.fromkeys(session_cfg.state),
             task_queue=task_queue,
         )
 
         agent_session = self._bd_build_session(session_cfg, session_state)
+        self._bd_attach_hooks(agent_session, session_name)
 
         dispatcher_name = session_cfg.dispatcher or next(iter(session_cfg.agents), "")
         if not dispatcher_name:
@@ -151,6 +153,128 @@ class Builder(Loader):
         )
 
         return agent_session, dispatcher
+
+    ##### EVENT HOOKS #####
+
+    @staticmethod
+    def _bd_attach_hooks(session: AgentSession[SessionState], session_name: str) -> None:
+        """Register event listeners for runtime observability."""
+        _prev_agent: dict[str, str] = {"name": ""}
+
+        def _active_agent() -> str:
+            agent = session.current_agent
+            return type(agent).__name__ if agent else "?"
+
+        def _on_state(ev: Any) -> None:
+            if ev.new_state == "speaking":
+                set_agent_speaking(True)
+            elif ev.old_state == "speaking":
+                set_agent_speaking(False)
+            agent_name = _active_agent()
+            if agent_name != _prev_agent["name"]:
+                if _prev_agent["name"]:
+                    logger.info(
+                        "agent_switched",
+                        active=agent_name,
+                        prev=_prev_agent["name"],
+                        icon=LogIcon.PROCESSING,
+                        tags="HANDOFF",
+                    )
+                _prev_agent["name"] = agent_name
+            logger.info(
+                "agent_state",
+                agent=agent_name,
+                state=ev.new_state,
+                prev=ev.old_state,
+                icon=LogIcon.AGENT,
+                tags="LIVE",
+            )
+
+        def _on_user_state(ev: Any) -> None:
+            logger.debug(
+                "user_state",
+                state=ev.new_state,
+                prev=ev.old_state,
+                tags="LIVE",
+            )
+
+        def _on_transcript(ev: Any) -> None:
+            if not ev.is_final:
+                return
+            logger.info(
+                "user_speech",
+                text=ev.transcript[:80],
+                lang=ev.language,
+                icon=LogIcon.STREAMING,
+                tags="LIVE",
+            )
+
+        def _on_tools(ev: Any) -> None:
+            for call, output in ev.zipped():
+                result = str(output.output)[:60] if output else "—"
+                is_handoff = ev.has_agent_handoff
+                logger.info(
+                    "tool_executed",
+                    agent=_active_agent(),
+                    tool=call.name,
+                    args=call.arguments[:80] if call.arguments else "",
+                    result=result,
+                    handoff=is_handoff,
+                    icon=LogIcon.TOOL,
+                    tags="HANDOFF" if is_handoff else "LIVE",
+                )
+
+        def _on_conversation_item(ev: Any) -> None:
+            item = ev.item
+            role = getattr(item, "role", "?")
+            content = ""
+            if hasattr(item, "text_content"):
+                content = (item.text_content or "")[:60]
+            elif hasattr(item, "content") and isinstance(item.content, str):
+                content = item.content[:60]
+            logger.debug(
+                "chat_item_added",
+                agent=_active_agent(),
+                role=role,
+                content=content,
+                icon=LogIcon.DEFAULT,
+                tags="CTX",
+            )
+
+        def _on_false_interruption(ev: Any) -> None:
+            logger.debug(
+                "false_interruption",
+                resumed=ev.resumed,
+                icon=LogIcon.WARNING,
+                tags="LIVE",
+            )
+
+        def _on_error(ev: Any) -> None:
+            logger.error(
+                "session_error",
+                source=type(ev.source).__name__,
+                error=str(ev.error)[:120],
+                icon=LogIcon.ERROR,
+                tags="LIVE",
+            )
+
+        def _on_close(ev: Any) -> None:
+            logger.info(
+                "session_closed",
+                reason=ev.reason.value if hasattr(ev.reason, "value") else str(ev.reason),
+                session=session_name,
+                icon=LogIcon.COMPLETE,
+                tags="LIVE",
+            )
+
+        session.on("agent_state_changed", _on_state)
+        session.on("user_state_changed", _on_user_state)
+        session.on("user_input_transcribed", _on_transcript)
+        session.on("function_tools_executed", _on_tools)
+        session.on("conversation_item_added", _on_conversation_item)
+        session.on("agent_false_interruption", _on_false_interruption)
+        session.on("error", _on_error)
+        session.on("close", _on_close)
 
     ##### AGENT BUILDING #####
 
@@ -182,10 +306,20 @@ class Builder(Loader):
         tts = ProviderRegistry.create_tts(agent_cfg.tts) if agent_cfg.tts else NOT_GIVEN
         vad = NOT_GIVEN
 
+        lang = st.USER_LANGUAGE
+        instructions = agent_cfg.instructions
+        if lang != "en":
+            lang_name = _LANG_NAMES.get(lang, lang)
+            instructions = (
+                f"LANGUAGE: You MUST respond in {lang_name} at ALL times, "
+                f"including your very first message. Never respond in English.\n\n"
+                f"{instructions}"
+            )
+
         has_queue = session_cfg.task_queue.enabled
         agent_cls = self._bd_agent_class(name, agent_cfg, has_queue=has_queue)
         agent = agent_cls(
-            instructions=agent_cfg.instructions,
+            instructions=instructions,
             chat_ctx=chat_ctx,
             tools=tools + handoff_tools,
             mcp_servers=mcp_servers if mcp_servers else NOT_GIVEN,
@@ -225,24 +359,34 @@ class Builder(Loader):
     def _bd_agent_class(
         name: str, cfg: AgentConfig, *, has_queue: bool,
     ) -> type[Agent]:
-        """Return Agent or a dynamic subclass with lifecycle hooks."""
-        needs_subclass = bool(cfg.greeting) or has_queue
-        if not needs_subclass:
-            return Agent
-
+        """Always return a dynamic Agent subclass with on_enter for handoff support."""
         raw_greeting = cfg.greeting
         lang = st.USER_LANGUAGE
-        greeting = (
-            f"You MUST respond in {_LANG_NAMES.get(lang, lang)}. {raw_greeting}"
-            if raw_greeting and lang != "en"
-            else raw_greeting
+        lang_prefix = (
+            f"You MUST respond in {_LANG_NAMES.get(lang, lang)}. "
+            if lang != "en" else ""
         )
+        greeting = f"{lang_prefix}{raw_greeting}" if raw_greeting else ""
         on_complete_instructions = cfg.execution.on_complete.instructions
 
         class _ConfiguredAgent(Agent):
             async def on_enter(self) -> None:
-                if greeting:
-                    await self.session.generate_reply(instructions=greeting)
+                is_handoff = bool(self.chat_ctx.items)
+                match (is_handoff, bool(greeting)):
+                    case (False, True):
+                        await self.session.generate_reply(instructions=greeting)
+                    case (False, False):
+                        await self.session.generate_reply()
+                    case (True, True):
+                        await self.session.generate_reply()
+                    case (True, False):
+                        await self.session.generate_reply(instructions=(
+                            f"{lang_prefix}"
+                            "You were just transferred a task by the previous agent. "
+                            "Fulfill the user's most recent request using your available tools. "
+                            "Share your findings with the user BEFORE transferring back. "
+                            "Do NOT transfer back until you have actually completed your work."
+                        ))
 
             async def on_user_turn_completed(
                 self, turn_ctx: Any, new_message: Any = None,

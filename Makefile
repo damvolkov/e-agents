@@ -197,13 +197,10 @@ _ensure-deps:
 		echo "$(GREEN)=== All services running ===$(RESET)"; \
 	fi
 
-SCRIPT ?=
 script: _ensure-deps
-ifndef SCRIPT
-	@echo "$(RED)=== Usage: make script SCRIPT=tests/scripts/test_dloop.py ===$(RESET)"; exit 1
-endif
-	@echo "$(GREEN)=== Running script $(SCRIPT) ===$(RESET)"
-	@uv run $(SCRIPT)
+	@$(if $(filter-out $@,$(MAKECMDGOALS)),,echo "$(RED)=== Usage: make script handoffs ===$(RESET)" && exit 1)
+	@echo "$(GREEN)=== Running scripts/$(filter-out $@,$(MAKECMDGOALS)).py ===$(RESET)"
+	@uv run scripts/$(filter-out $@,$(MAKECMDGOALS)).py
 
 # Join variables
 IDENTITY ?= user
@@ -227,3 +224,7 @@ clean:
 	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	@rm -rf dist/ build/ *.egg-info/
 	@echo "$(GREEN)=== Clean complete ===$(RESET)"
+
+# Catch-all: swallow extra positional args (used by `make script <name>`)
+%:
+	@:

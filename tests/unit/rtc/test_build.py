@@ -211,7 +211,7 @@ async def test_builder_build_agent_creates_agent(builder: Builder) -> None:
     session_cfg = builder.config.sessions["test"]
     agent = builder._bd_build_agent("scraper", session_cfg)
     assert isinstance(agent, Agent)
-    assert agent.instructions == "Search specialist."
+    assert "Search specialist." in agent.instructions
 
 
 async def test_builder_build_agent_with_greeting_creates_subclass(builder: Builder) -> None:
@@ -222,10 +222,11 @@ async def test_builder_build_agent_with_greeting_creates_subclass(builder: Build
     assert hasattr(agent, "on_enter")
 
 
-async def test_builder_build_agent_without_greeting_is_plain(builder: Builder) -> None:
+async def test_builder_build_agent_without_greeting_is_subclass(builder: Builder) -> None:
     session_cfg = builder.config.sessions["test"]
     agent = builder._bd_build_agent("scraper", session_cfg)
-    assert type(agent) is Agent
+    assert isinstance(agent, Agent)
+    assert type(agent).__name__ == "Agent_scraper"
 
 
 async def test_builder_build_agent_includes_tools(builder: Builder) -> None:
@@ -252,10 +253,11 @@ async def test_builder_build_agent_raises_for_unknown(builder: Builder) -> None:
 ##### DYNAMIC AGENT CLASS #####
 
 
-async def test_builder_agent_class_plain_when_no_hooks() -> None:
+async def test_builder_agent_class_always_subclass() -> None:
     cfg = AgentConfig.model_validate({"name": "plain", "instructions": "No greeting."})
     cls = Builder._bd_agent_class("plain", cfg, has_queue=False)
-    assert cls is Agent
+    assert issubclass(cls, Agent)
+    assert cls.__name__ == "Agent_plain"
 
 
 async def test_builder_agent_class_subclass_with_greeting() -> None:
@@ -294,7 +296,7 @@ async def test_builder_handoff_tool_returns_agent(builder: Builder) -> None:
     mock_ctx.session.current_agent.chat_ctx = MagicMock()
     result = await tool(mock_ctx)
     assert isinstance(result, Agent)
-    assert result.instructions == "Search specialist."
+    assert "Search specialist." in result.instructions
 
 
 async def test_builder_handoff_fresh_context(builder: Builder) -> None:
@@ -407,7 +409,7 @@ async def test_builder_build_creates_session_and_dispatcher(
 ) -> None:
     agent_session, dispatcher = builder.build("test", shared_state)
     assert isinstance(dispatcher, Agent)
-    assert dispatcher.instructions == "Helpful assistant."
+    assert "Helpful assistant." in dispatcher.instructions
     assert agent_session.userdata.data == {"user_name": None, "topic": None}
 
 
@@ -444,7 +446,7 @@ async def test_builder_build_dispatcher_is_first_agent_when_no_dispatcher(
         **cfg.model_dump(), "dispatcher": "",
     })
     _, dispatcher = builder.build("test", shared_state)
-    assert dispatcher.instructions == "Helpful assistant."
+    assert "Helpful assistant." in dispatcher.instructions
 
 
 async def test_builder_build_raises_for_unknown_session(

@@ -3,6 +3,8 @@
 import asyncio
 import contextlib
 import logging
+import re
+import time as _time
 
 import numpy as np
 import orjson as json
@@ -19,25 +21,47 @@ _log = logging.getLogger("e_agents.stt.whisperlive")
 _STABLE_DELAY = 0.8
 _WS_DRAIN_TIMEOUT = 5
 _WS_CLOSE_TIMEOUT = 5
+_ECHO_GATE_DURATION = 1.5
 
-_HALLUCINATION_PATTERNS: frozenset[str] = frozenset({
-    "gracias", "gracias.", "gracias!", "¡gracias!",
-    "gracias por ver.", "gracias por ver el vídeo.", "gracias por ver el video.",
-    "thank you.", "thank you", "thanks.", "thanks for watching.",
-    "merci.", "merci d'avoir regardé.", "danke.", "obrigado.", "obrigada.",
-    "adiós.", "bye.", "goodbye.",
-    "subtítulos por...", "subtítulos realizados por...",
-    "subtitles by...", "subtitles made by...",
-    "¡suscríbete!", "subscribe!", "like and subscribe!",
-    "...", ".", "!", "?", "¿?",
+##### WHISPER PHANTOM FILTER #####
+
+_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
+
+_WHISPER_PHANTOMS: frozenset[str] = frozenset({
+    "gracias",
+    "thank you",
+    "thanks",
+    "thank you for watching",
+    "thanks for watching",
+    "gracias por ver",
+    "subtitulos realizados por la comunidad de amara org",
+    "subtitulos por la comunidad de amara org",
+    "you",
 })
-_MIN_HALLUCINATION_WORDS = 2
 
 
-def _is_hallucination(text: str) -> bool:
-    """Detect common Whisper hallucinations on silence/echo."""
-    stripped = text.strip().lower()
-    return stripped in _HALLUCINATION_PATTERNS or len(stripped.split()) < _MIN_HALLUCINATION_WORDS
+def _is_whisper_phantom(text: str) -> bool:
+    """Detect known Whisper hallucinations (exact match only, not substring)."""
+    normalized = _PUNCT_RE.sub("", text.strip().lower()).strip()
+    return normalized in _WHISPER_PHANTOMS
+
+
+##### ECHO / SPEAKING-STATE SUPPRESSION #####
+
+_echo_gate_until: float = 0.0
+_agent_speaking: bool = False
+
+
+def set_agent_speaking(speaking: bool) -> None:
+    """Gate STT output while agent speaks, plus post-speech cooldown."""
+    global _agent_speaking, _echo_gate_until  # noqa: PLW0603
+    _agent_speaking = speaking
+    if not speaking:
+        _echo_gate_until = _time.monotonic() + _ECHO_GATE_DURATION
+
+
+def _is_echo_suppressed() -> bool:
+    return _agent_speaking or _time.monotonic() < _echo_gate_until
 
 
 def _pcm_int16_to_float32(data: bytes | bytearray | memoryview) -> bytes:
@@ -236,8 +260,12 @@ class WhisperLiveStream(stt.RecognizeStream):
             new = target_text[committed_len:].strip()
             if not new:
                 return
-            if _is_hallucination(new):
-                _log.debug("HALLUCINATION_FILTERED text=%r", new)
+            if _is_echo_suppressed():
+                _log.debug("ECHO_SUPPRESSED text=%r", new)
+                committed_len = len(target_text)
+                return
+            if _is_whisper_phantom(new):
+                _log.debug("PHANTOM_FILTERED text=%r", new)
                 committed_len = len(target_text)
                 return
             self._event_ch.send_nowait(stt.SpeechEvent(
@@ -288,7 +316,7 @@ class WhisperLiveStream(stt.RecognizeStream):
                 debounce.cancel()
             if last_text:
                 remaining = last_text[committed_len:].strip()
-                if remaining and not _is_hallucination(remaining):
+                if remaining and not _is_echo_suppressed() and not _is_whisper_phantom(remaining):
                     self._event_ch.send_nowait(stt.SpeechEvent(
                         type=stt.SpeechEventType.FINAL_TRANSCRIPT,
                         alternatives=[
