@@ -43,6 +43,30 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Script: experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/experiment.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Script: triage",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/triage.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Docker Attach",
             "type": "debugpy",
             "request": "attach",
