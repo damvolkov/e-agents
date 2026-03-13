@@ -1,5 +1,5 @@
 name: simple
-stt: whisperlive
+stt: speaches
 tts: kokoro
 vad: silero
 llm:

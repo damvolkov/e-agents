@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 
 from livekit.agents import stt, tts
 
-from e_agents.rtc.adapters.stt import WhisperLiveSTT
+from e_agents.rtc.adapters.stt import SpeachesSTT, WhisperLiveSTT
 from e_agents.rtc.adapters.tts import KokoroTTS
 from e_agents.rtc.core.settings import STTBackend, TTSBackend
 from e_agents.shared.core.logger import LogIcon, logger
@@ -27,7 +27,10 @@ except ImportError:
 class ProviderRegistry:
     """Central registry for STT, TTS, LLM and VAD providers."""
 
-    _stt: ClassVar[dict[STTBackend, type]] = {STTBackend.WHISPERLIVE: WhisperLiveSTT}
+    _stt: ClassVar[dict[STTBackend, type]] = {
+        STTBackend.SPEACHES: SpeachesSTT,
+        STTBackend.WHISPERLIVE: WhisperLiveSTT,
+    }
     _tts: ClassVar[dict[TTSBackend, type]] = {TTSBackend.KOKORO: KokoroTTS}
     _llm: ClassVar[dict[LLMProvider, type]] = {}
     _populated: ClassVar[bool] = False

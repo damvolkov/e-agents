@@ -3,53 +3,40 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import orjson as json
 import pytest
 from livekit import rtc
 
-from e_agents.rtc.adapters.stt import WhisperLiveSTT
+from e_agents.rtc.adapters.stt import SpeachesSTT
 from e_agents.rtc.adapters.tts import KokoroTTS
-
-
-async def _async_iter(items: list[bytes]) -> AsyncIterator[bytes]:
-    for item in items:
-        yield item
 
 
 ##### STT #####
 
 
 @pytest.fixture
-async def stt_adapter() -> AsyncIterator[WhisperLiveSTT]:
-    """WhisperLiveSTT adapter with fake URL for mocked tests."""
-    adapter = WhisperLiveSTT(ws_url="ws://test-stt:9090", language="en")
+async def stt_adapter() -> AsyncIterator[SpeachesSTT]:
+    """SpeachesSTT adapter with fake URL for mocked tests."""
+    adapter = SpeachesSTT(base_url="http://test-stt:8000", language="en")
     yield adapter
     await adapter.aclose()
 
 
 @pytest.fixture
-def mock_ws_factory() -> Callable[[list[bytes]], AsyncMock]:
-    """Factory: mock WebSocket with async iteration over messages."""
+def mock_httpx_post() -> Callable[[str], AsyncMock]:
+    """Factory: mock httpx client returning JSON transcription response."""
 
-    def _factory(messages: list[bytes]) -> AsyncMock:
-        ws = AsyncMock()
-        ws.send = AsyncMock()
-        ws.__aiter__ = lambda self: _async_iter(messages)
-        return ws
+    def _factory(response_text: str) -> AsyncMock:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = json.dumps({"text": response_text})
+        mock_response.raise_for_status = MagicMock()
 
-    return _factory
-
-
-@pytest.fixture
-def mock_connect_factory() -> Callable[[AsyncMock], AsyncMock]:
-    """Factory: mock websockets.connect context manager."""
-
-    def _factory(mock_ws: AsyncMock) -> AsyncMock:
-        ctx = AsyncMock()
-        ctx.__aenter__ = AsyncMock(return_value=mock_ws)
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        return ctx
+        client = AsyncMock()
+        client.post = AsyncMock(return_value=mock_response)
+        return client
 
     return _factory
 

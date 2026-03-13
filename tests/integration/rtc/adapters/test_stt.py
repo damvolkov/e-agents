@@ -1,4 +1,4 @@
-"""Integration tests for WhisperLive STT — real service at ws://localhost:45120."""
+"""Integration tests for Speaches STT — real service at http://localhost:45120."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from livekit.agents import tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from scipy.signal import resample as scipy_resample
 
-from e_agents.rtc.adapters.stt import WhisperLiveSTT
+from e_agents.rtc.adapters.stt import SpeachesSTT
 from e_agents.rtc.adapters.tts import KokoroTTS
 
 _TTS_RATE = 24000
@@ -75,7 +75,7 @@ async def test_stt_batch_recognize_speech(text: str) -> None:
     pcm_16k = _resample(pcm_24k, _TTS_RATE, _STT_RATE)
     frame = _build_frame(pcm_16k)
 
-    adapter = WhisperLiveSTT(language="en")
+    adapter = SpeachesSTT(language="en")
     result = await adapter._recognize_impl([frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.type.name == "FINAL_TRANSCRIPT"
@@ -85,7 +85,7 @@ async def test_stt_batch_recognize_speech(text: str) -> None:
 
 
 @pytest.mark.slow
-async def test_stt_batch_recognize_silence(stt_adapter: WhisperLiveSTT) -> None:
+async def test_stt_batch_recognize_silence(stt_adapter: SpeachesSTT) -> None:
     """Batch recognition of silence returns without error."""
     silence = b"\x00\x00" * _STT_RATE
     frame = _build_frame(silence)
@@ -96,7 +96,7 @@ async def test_stt_batch_recognize_silence(stt_adapter: WhisperLiveSTT) -> None:
 
 
 @pytest.mark.slow
-async def test_stt_batch_recognize_tone(stt_adapter: WhisperLiveSTT) -> None:
+async def test_stt_batch_recognize_tone(stt_adapter: SpeachesSTT) -> None:
     """Batch recognition of a pure tone completes without error."""
     tone = _generate_tone(440.0, 1.0)
     frame = _build_frame(tone)
@@ -117,7 +117,7 @@ async def test_stt_batch_language_override(language: str) -> None:
     pcm_16k = _resample(pcm_24k, _TTS_RATE, _STT_RATE)
     frame = _build_frame(pcm_16k)
 
-    adapter = WhisperLiveSTT(language=language)
+    adapter = SpeachesSTT(language=language)
     result = await adapter._recognize_impl([frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.alternatives[0].language == language
@@ -128,8 +128,8 @@ async def test_stt_batch_language_override(language: str) -> None:
 
 
 @pytest.mark.slow
-async def test_stt_service_reachable(stt_adapter: WhisperLiveSTT, sample_pcm_frame: rtc.AudioFrame) -> None:
-    """WhisperLive WebSocket accepts connection and responds."""
+async def test_stt_service_reachable(stt_adapter: SpeachesSTT, sample_pcm_frame: rtc.AudioFrame) -> None:
+    """Speaches REST endpoint accepts connection and responds."""
     result = await stt_adapter._recognize_impl([sample_pcm_frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.type.name == "FINAL_TRANSCRIPT"
@@ -152,7 +152,7 @@ async def test_stt_batch_multiple_frames() -> None:
         _build_frame(pcm_16k[chunk_size * 2 :]),
     ]
 
-    adapter = WhisperLiveSTT(language="en")
+    adapter = SpeachesSTT(language="en")
     result = await adapter._recognize_impl(frames, conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.type.name == "FINAL_TRANSCRIPT"

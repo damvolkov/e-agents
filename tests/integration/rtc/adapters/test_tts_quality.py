@@ -1,11 +1,11 @@
-"""TTS output quality — audio validation and PESQ evaluation."""
+"""TTS output quality — audio validation and PESQ evaluation via pytest-audioeval."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 from livekit.agents import tts
-from pesq import pesq as pesq_score
+from pytest_audioeval.metrics.audio import AudioMetrics
 from scipy.signal import resample as scipy_resample
 
 from e_agents.rtc.adapters.tts import KokoroTTS
@@ -69,7 +69,7 @@ async def test_tts_audio_valid_pcm(text: str) -> None:
 
 @pytest.mark.slow
 async def test_tts_pesq_consistency() -> None:
-    """Two TTS runs of same text produce perceptually similar audio (PESQ ≥ threshold)."""
+    """Two TTS runs of same text produce perceptually similar audio (PESQ >= threshold)."""
     adapter = KokoroTTS()
     text = "the quick brown fox jumps over the lazy dog"
 
@@ -80,10 +80,8 @@ async def test_tts_pesq_consistency() -> None:
     deg = _resample_float(pcm_b, _TTS_RATE, _PESQ_RATE)
 
     min_len = min(len(ref), len(deg))
-    score = pesq_score(_PESQ_RATE, ref[:min_len], deg[:min_len], "wb")
-
-    assert score > _PESQ_THRESHOLD, (
-        f"PESQ {score:.2f} < {_PESQ_THRESHOLD} — TTS output inconsistent across runs"
-    )
+    AudioMetrics.compute(
+        ref[:min_len], deg[:min_len], sample_rate=_PESQ_RATE,
+    ).assert_quality(min_mos=_PESQ_THRESHOLD)
 
     await adapter.aclose()

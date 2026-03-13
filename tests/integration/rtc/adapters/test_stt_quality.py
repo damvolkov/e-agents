@@ -1,28 +1,29 @@
-"""STT transcription quality — WER/CER evaluation via jiwer."""
+"""STT transcription quality — WER/CER evaluation via pytest-audioeval."""
 
 from __future__ import annotations
 
+import io
 import re
 
 import numpy as np
 import pytest
-from jiwer import cer, process_words
+import soundfile as sf
 from livekit import rtc
 from livekit.agents import tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
+from pytest_audioeval.client import AudioEval
+from pytest_audioeval.metrics.text import TextMetrics
 from scipy.signal import resample as scipy_resample
 
-from e_agents.rtc.adapters.stt import WhisperLiveSTT
+from e_agents.rtc.adapters.stt import SpeachesSTT
 from e_agents.rtc.adapters.tts import KokoroTTS
 
-_WER_THRESHOLD = 0.3
-_CER_THRESHOLD = 0.2
 _ROUNDTRIP_WER_THRESHOLD = 0.7
 _ROUNDTRIP_CER_THRESHOLD = 0.5
+_WER_THRESHOLD = 0.3
+_CER_THRESHOLD = 0.2
 _TTS_RATE = 24000
 _STT_RATE = 16000
-
-_REFERENCES: dict[str, tuple[str, str]] = {}
 
 _STRIP_RE = re.compile(r"[^\w\s]")
 
@@ -64,7 +65,13 @@ def _build_frame(pcm: bytes, rate: int = _STT_RATE, channels: int = 1) -> rtc.Au
     )
 
 
-##### ROUNDTRIP — TTS → STT → WER #####
+def _wav_to_pcm(wav_bytes: bytes) -> tuple[bytes, int]:
+    """Extract PCM int16 and sample rate from WAV bytes."""
+    data, rate = sf.read(io.BytesIO(wav_bytes), dtype="int16")
+    return data.tobytes(), rate
+
+
+##### ROUNDTRIP — TTS -> STT -> WER #####
 
 
 @pytest.mark.slow
@@ -79,64 +86,70 @@ def _build_frame(pcm: bytes, rate: int = _STT_RATE, channels: int = 1) -> rtc.Au
     ids=["harvard", "pangram", "request", "morning"],
 )
 async def test_stt_quality_roundtrip_wer(text: str, language: str) -> None:
-    """Text → TTS → resample → STT → compare WER/CER against original."""
+    """Text -> TTS -> resample -> STT -> compare WER/CER against original."""
     tts_adapter = KokoroTTS()
-    stt_adapter = WhisperLiveSTT(language=language)
+    stt_adapter = SpeachesSTT(language=language)
 
     pcm = await _collect_pcm(tts_adapter.synthesize(text))
     assert pcm, "TTS produced no audio"
 
     pcm_16k = _resample(pcm, _TTS_RATE, _STT_RATE)
     result = await stt_adapter._recognize_impl(
-        [_build_frame(pcm_16k)], conn_options=DEFAULT_API_CONNECT_OPTIONS
+        [_build_frame(pcm_16k)], conn_options=DEFAULT_API_CONNECT_OPTIONS,
     )
-    hypothesis = _normalize(result.alternatives[0].text)
-    reference = _normalize(text)
-    alignment = process_words(reference, hypothesis)
 
-    assert alignment.wer < _ROUNDTRIP_WER_THRESHOLD, (
-        f"WER {alignment.wer:.1%} — subs={alignment.substitutions} "
-        f"ins={alignment.insertions} del={alignment.deletions} | hyp={hypothesis!r}"
-    )
-    assert cer(reference, hypothesis) < _ROUNDTRIP_CER_THRESHOLD, (
-        f"CER {cer(reference, hypothesis):.1%} | hyp={hypothesis!r}"
-    )
+    TextMetrics.compute(
+        _normalize(text), _normalize(result.alternatives[0].text),
+    ).assert_quality(max_wer=_ROUNDTRIP_WER_THRESHOLD, max_cer=_ROUNDTRIP_CER_THRESHOLD)
 
     await tts_adapter.aclose()
     await stt_adapter.aclose()
 
 
-##### REFERENCE-BASED WER #####
+##### EMBEDDED SAMPLES — GROUND-TRUTH AUDIO -> STT -> WER #####
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    ("fixture_name", "reference", "language"),
-    [(k, v[0], v[1]) for k, v in _REFERENCES.items()],
-    ids=list(_REFERENCES),
+    "sample_key",
+    ["en_hello_world", "en_counting", "en_quick_brown_fox"],
+    ids=["hello-world", "counting", "pangram"],
 )
-async def test_stt_quality_wer_reference(
-    fixture_name: str,
-    reference: str,
-    language: str,
-    request: pytest.FixtureRequest,
-) -> None:
-    """Evaluate WER/CER against known reference transcriptions."""
-    audio: bytes = request.getfixturevalue(fixture_name)
-    stt_inst = WhisperLiveSTT(language=language)
-    result = await stt_inst._recognize_impl(
-        [_build_frame(audio)], conn_options=DEFAULT_API_CONNECT_OPTIONS
-    )
-    hypothesis = _normalize(result.alternatives[0].text)
-    ref = _normalize(reference)
-    alignment = process_words(ref, hypothesis)
+async def test_stt_quality_embedded_en(audioeval: AudioEval, sample_key: str) -> None:
+    """Evaluate STT against embedded English ground-truth audio."""
+    sample = getattr(audioeval.samples, sample_key)
+    stt_adapter = SpeachesSTT(language="en")
 
-    assert alignment.wer < _WER_THRESHOLD, (
-        f"WER {alignment.wer:.1%} — subs={alignment.substitutions} "
-        f"ins={alignment.insertions} del={alignment.deletions} | hyp={hypothesis!r}"
-    )
-    assert cer(ref, hypothesis) < _CER_THRESHOLD, (
-        f"CER {cer(ref, hypothesis):.1%} | hyp={hypothesis!r}"
+    pcm, rate = _wav_to_pcm(sample.audio_bytes())
+    result = await stt_adapter._recognize_impl(
+        [_build_frame(pcm, rate=rate)], conn_options=DEFAULT_API_CONNECT_OPTIONS,
     )
 
-    await stt_inst.aclose()
+    TextMetrics.compute(
+        _normalize(sample.reference_text), _normalize(result.alternatives[0].text),
+    ).assert_quality(max_wer=_WER_THRESHOLD, max_cer=_CER_THRESHOLD)
+
+    await stt_adapter.aclose()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "sample_key",
+    ["es_hola_mundo", "es_conteo", "es_pangrama"],
+    ids=["hola-mundo", "conteo", "pangrama"],
+)
+async def test_stt_quality_embedded_es(audioeval: AudioEval, sample_key: str) -> None:
+    """Evaluate STT against embedded Spanish ground-truth audio."""
+    sample = getattr(audioeval.samples, sample_key)
+    stt_adapter = SpeachesSTT(language="es")
+
+    pcm, rate = _wav_to_pcm(sample.audio_bytes())
+    result = await stt_adapter._recognize_impl(
+        [_build_frame(pcm, rate=rate)], conn_options=DEFAULT_API_CONNECT_OPTIONS,
+    )
+
+    TextMetrics.compute(
+        _normalize(sample.reference_text), _normalize(result.alternatives[0].text),
+    ).assert_quality(max_wer=_WER_THRESHOLD, max_cer=_CER_THRESHOLD)
+
+    await stt_adapter.aclose()

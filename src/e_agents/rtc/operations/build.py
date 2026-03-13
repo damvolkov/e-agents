@@ -11,7 +11,7 @@ from livekit.agents import NOT_GIVEN, Agent, AgentSession, RunContext, function_
 from livekit.agents.llm import FunctionTool
 from livekit.agents.llm.tool_context import FunctionToolInfo
 
-from e_agents.rtc.adapters.stt.whisperlive import set_agent_speaking
+from e_agents.rtc.adapters.stt.speaches import set_agent_speaking
 from e_agents.rtc.core.exceptions import SessionBuildError
 from e_agents.rtc.models.config import (
     AgentConfig,

@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings
 
 
 class STTBackend(StrEnum):
+    SPEACHES = auto()
     WHISPERLIVE = auto()
     OPENAI = auto()
     GOOGLE = auto()
@@ -41,9 +42,9 @@ class AgentRole(StrEnum):
 class RTCSettings(BaseSettings):
     """Settings for the LiveKit WebRTC server module."""
 
-    # STT (WhisperLive WebSocket)
-    STT_WS_URL: AnyUrl = "ws://localhost:45120"
-    STT_MODEL: str = "large-v3-turbo"
+    # STT (Speaches — OpenAI-compatible)
+    STT_BASE_URL: AnyHttpUrl = "http://localhost:45120"
+    STT_MODEL: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
     STT_TIMEOUT: float = 30.0
 
     # TTS (Kokoro OpenAI-compatible)

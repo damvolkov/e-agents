@@ -78,9 +78,9 @@ class WhisperLiveSTT(stt.STT):
     def __init__(
         self,
         *,
-        ws_url: str = str(st.STT_WS_URL),
+        ws_url: str | None = None,
         language: str = st.USER_LANGUAGE,
-        model: str = st.STT_MODEL,
+        model: str = "large-v3-turbo",
         timeout: float = st.STT_TIMEOUT,
     ) -> None:
         super().__init__(
@@ -89,6 +89,9 @@ class WhisperLiveSTT(stt.STT):
                 interim_results=True,
             )
         )
+        if ws_url is None:
+            base = str(st.STT_BASE_URL).rstrip("/")
+            ws_url = ("wss" + base[5:]) if base.startswith("https") else ("ws" + base[4:])
         self._ws_url = ws_url.rstrip("/")
         self._language = language
         self._model = model
