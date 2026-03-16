@@ -1,4 +1,4 @@
-"""Unit tests for Speaches STT adapter (mocked services)."""
+"""Unit tests for FasterWhisper STT adapter (mocked services)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 from livekit import rtc
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
 
-from e_agents.rtc.adapters.stt import SpeachesSTT
+from e_agents.rtc.adapters.stt import FasterWhisperSTT
 
 ##### TRANSCRIPTION #####
 
@@ -25,7 +25,7 @@ from e_agents.rtc.adapters.stt import SpeachesSTT
     ids=["simple", "empty", "trimmed"],
 )
 async def test_stt_recognize_transcripts(
-    stt_adapter: SpeachesSTT,
+    stt_adapter: FasterWhisperSTT,
     audio_frame: rtc.AudioFrame,
     mock_httpx_post: Callable[[str], AsyncMock],
     response_text: str,
@@ -33,7 +33,7 @@ async def test_stt_recognize_transcripts(
 ) -> None:
     mock_client = mock_httpx_post(response_text)
 
-    with patch("e_agents.rtc.adapters.stt.speaches.httpx.AsyncClient") as mock_cls:
+    with patch("e_agents.rtc.adapters.stt.fwhisper.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         result = await stt_adapter._recognize_impl(
@@ -58,7 +58,7 @@ async def test_stt_recognize_transcripts(
     ids=["english", "spanish", "french", "default"],
 )
 async def test_stt_recognize_language(
-    stt_adapter: SpeachesSTT,
+    stt_adapter: FasterWhisperSTT,
     audio_frame: rtc.AudioFrame,
     mock_httpx_post: Callable[[str], AsyncMock],
     language: str | None,
@@ -66,7 +66,7 @@ async def test_stt_recognize_language(
 ) -> None:
     mock_client = mock_httpx_post("test")
 
-    with patch("e_agents.rtc.adapters.stt.speaches.httpx.AsyncClient") as mock_cls:
+    with patch("e_agents.rtc.adapters.stt.fwhisper.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         lang_arg = language if language else NOT_GIVEN
@@ -89,16 +89,16 @@ async def test_stt_recognize_language(
     ids=["turbo-ct2", "distil-small"],
 )
 async def test_stt_model_property(model: str, expected_model: str) -> None:
-    adapter = SpeachesSTT(model=model)
+    adapter = FasterWhisperSTT(model=model)
 
     assert adapter.model == expected_model
-    assert adapter.provider == "speaches"
+    assert adapter.provider == "fwhisper"
 
     await adapter.aclose()
 
 
 async def test_stt_capabilities() -> None:
-    adapter = SpeachesSTT()
+    adapter = FasterWhisperSTT()
 
     assert adapter.capabilities.streaming is True
 

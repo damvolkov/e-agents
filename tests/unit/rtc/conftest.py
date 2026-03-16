@@ -91,7 +91,7 @@ def session_web_raw() -> dict[str, Any]:
     """Config matching config/sessions/web.yaml."""
     return {
         "name": "web",
-        "stt": "whisperlive",
+        "stt": "fwhisper",
         "tts": "kokoro",
         "vad": "silero",
         "llm": {"provider": "google", "model": "gemini-2.0-flash"},
@@ -115,7 +115,7 @@ def session_full_raw() -> dict[str, Any]:
     """Session with every optional field populated."""
     return {
         "name": "full_session",
-        "stt": "whisperlive",
+        "stt": "fwhisper",
         "tts": "kokoro",
         "vad": "silero",
         "llm": {"provider": "openai", "model": "gpt-4o"},

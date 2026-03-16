@@ -9,7 +9,7 @@ import orjson as json
 import pytest
 from livekit import rtc
 
-from e_agents.rtc.adapters.stt import SpeachesSTT
+from e_agents.rtc.adapters.stt import FasterWhisperSTT
 from e_agents.rtc.adapters.tts import KokoroTTS
 
 
@@ -17,9 +17,9 @@ from e_agents.rtc.adapters.tts import KokoroTTS
 
 
 @pytest.fixture
-async def stt_adapter() -> AsyncIterator[SpeachesSTT]:
-    """SpeachesSTT adapter with fake URL for mocked tests."""
-    adapter = SpeachesSTT(base_url="http://test-stt:8000", language="en")
+async def stt_adapter() -> AsyncIterator[FasterWhisperSTT]:
+    """FasterWhisperSTT adapter with fake URL for mocked tests."""
+    adapter = FasterWhisperSTT(base_url="http://test-stt:8000", language="en")
     yield adapter
     await adapter.aclose()
 

@@ -15,7 +15,7 @@ from pytest_audioeval.client import AudioEval
 from pytest_audioeval.metrics.text import TextMetrics
 from scipy.signal import resample as scipy_resample
 
-from e_agents.rtc.adapters.stt import SpeachesSTT
+from e_agents.rtc.adapters.stt import FasterWhisperSTT
 from e_agents.rtc.adapters.tts import KokoroTTS
 
 _ROUNDTRIP_WER_THRESHOLD = 0.7
@@ -88,7 +88,7 @@ def _wav_to_pcm(wav_bytes: bytes) -> tuple[bytes, int]:
 async def test_stt_quality_roundtrip_wer(text: str, language: str) -> None:
     """Text -> TTS -> resample -> STT -> compare WER/CER against original."""
     tts_adapter = KokoroTTS()
-    stt_adapter = SpeachesSTT(language=language)
+    stt_adapter = FasterWhisperSTT(language=language)
 
     pcm = await _collect_pcm(tts_adapter.synthesize(text))
     assert pcm, "TTS produced no audio"
@@ -118,7 +118,7 @@ async def test_stt_quality_roundtrip_wer(text: str, language: str) -> None:
 async def test_stt_quality_embedded_en(audioeval: AudioEval, sample_key: str) -> None:
     """Evaluate STT against embedded English ground-truth audio."""
     sample = getattr(audioeval.samples, sample_key)
-    stt_adapter = SpeachesSTT(language="en")
+    stt_adapter = FasterWhisperSTT(language="en")
 
     pcm, rate = _wav_to_pcm(sample.audio_bytes())
     result = await stt_adapter._recognize_impl(
@@ -141,7 +141,7 @@ async def test_stt_quality_embedded_en(audioeval: AudioEval, sample_key: str) ->
 async def test_stt_quality_embedded_es(audioeval: AudioEval, sample_key: str) -> None:
     """Evaluate STT against embedded Spanish ground-truth audio."""
     sample = getattr(audioeval.samples, sample_key)
-    stt_adapter = SpeachesSTT(language="es")
+    stt_adapter = FasterWhisperSTT(language="es")
 
     pcm, rate = _wav_to_pcm(sample.audio_bytes())
     result = await stt_adapter._recognize_impl(

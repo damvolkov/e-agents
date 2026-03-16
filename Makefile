@@ -32,7 +32,7 @@ COMPOSE_FILE := compose.yml
 
 .PHONY: help install sync lock lint format type test test-integration \
         infra infra-down build logs \
-        run console join token script clean
+        run console join token stt script clean
 
 # -----------------------------------------------------------------------------
 # Help
@@ -46,7 +46,7 @@ help:
 	@echo "  $(GREEN)make lock$(RESET)         Update lockfile with current dependencies"
 	@echo ""
 	@echo "$(BOLD)Infrastructure:$(RESET)"
-	@echo "  $(GREEN)make infra$(RESET)        Start all services (API + STT/TTS/LiveKit)"
+	@echo "  $(GREEN)make infra$(RESET)        Start compose services (Redis + LiveKit + API)"
 	@echo "  $(GREEN)make infra-down$(RESET)   Stop all infrastructure services"
 	@echo "  $(GREEN)make logs$(RESET)         Follow API container logs"
 	@echo "  $(GREEN)make build$(RESET)        Build Docker image"
@@ -56,6 +56,7 @@ help:
 	@echo "  $(GREEN)make console$(RESET)      Start agent in console mode (local testing)"
 	@echo "  $(GREEN)make join$(RESET)         Join a room as participant"
 	@echo "  $(GREEN)make token$(RESET)        Generate LiveKit access token"
+	@echo "  $(GREEN)make stt$(RESET)          Live mic → Faster-Whisper WS (requires ffmpeg + websocat)"
 	@echo "  $(GREEN)make script$(RESET)       Run a script with infra (SCRIPT=path/to/script.py)"
 	@echo ""
 	@echo "$(BOLD)Variables:$(RESET)"
@@ -143,12 +144,13 @@ build:
 	@echo "$(GREEN)=== Build complete ===$(RESET)"
 
 infra:
-	@echo "$(GREEN)=== Starting all services ===$(RESET)"
-	@docker compose -f $(COMPOSE_FILE) up -d redis livekit stt tts api
+	@echo "$(GREEN)=== Starting compose services ===$(RESET)"
+	@docker compose -f $(COMPOSE_FILE) up -d redis livekit api
 	@echo "$(GREEN)=== Services ready ===$(RESET)"
 	@echo "$(CYAN)API: http://localhost:8000$(RESET)"
 	@echo "$(CYAN)Docs: http://localhost:8000/docs$(RESET)"
 	@echo "$(CYAN)LiveKit: ws://localhost:7880$(RESET)"
+	@echo "$(YELLOW)Note: STT/TTS managed by systemd (stt.service, tts.service)$(RESET)"
 
 infra-down:
 	@echo "$(YELLOW)=== Stopping all services ===$(RESET)"
@@ -176,26 +178,31 @@ console: _ensure-deps
 	@echo "$(GREEN)=== Starting Console Mode (session=$(SESSION)) ===$(RESET)"
 	@DEFAULT_SESSION=$(SESSION) uv run python -m e_agents.rtc.app console
 
-COMPOSE_NETWORK := e-agents_agents
-
 _ensure-deps:
-	@missing=false; \
-	for pair in "$(REDIS_EXT_PORT):redis" "$(LIVEKIT_EXT_PORT):livekit" "$(STT_EXT_PORT):stt" "$(TTS_EXT_PORT):tts"; do \
+	@fail=false; \
+	for pair in "$(REDIS_EXT_PORT):redis" "$(LIVEKIT_EXT_PORT):livekit"; do \
 		port=$${pair%%:*}; svc=$${pair##*:}; \
 		if nc -z localhost $$port 2>/dev/null; then \
 			echo "$(GREEN)  ✓ $$svc (port $$port)$(RESET)"; \
 		else \
-			missing=true; \
-			echo "$(YELLOW)  ✗ $$svc (port $$port)$(RESET)"; \
+			echo "$(YELLOW)  ✗ $$svc (port $$port) — starting via compose$(RESET)"; \
+			docker compose -f $(COMPOSE_FILE) up -d $$svc; \
 		fi; \
 	done; \
-	if [ "$$missing" = true ]; then \
-		echo "$(YELLOW)=== Starting missing services ===$(RESET)"; \
-		docker compose -f $(COMPOSE_FILE) up -d redis livekit stt tts; \
-		echo "$(GREEN)=== Services started ===$(RESET)"; \
-	else \
-		echo "$(GREEN)=== All services running ===$(RESET)"; \
-	fi
+	for pair in "$(STT_EXT_PORT):stt" "$(TTS_EXT_PORT):tts"; do \
+		port=$${pair%%:*}; svc=$${pair##*:}; \
+		if nc -z localhost $$port 2>/dev/null; then \
+			echo "$(GREEN)  ✓ $$svc (port $$port)$(RESET)"; \
+		else \
+			fail=true; \
+			echo "$(RED)  ✗ $$svc (port $$port) — run: systemctl --user start $$svc$(RESET)"; \
+		fi; \
+	done; \
+	if [ "$$fail" = true ]; then \
+		echo "$(RED)=== Missing systemd services — see above ===$(RESET)"; \
+		exit 1; \
+	fi; \
+	echo "$(GREEN)=== All services running ===$(RESET)"
 
 script: _ensure-deps
 	@$(if $(filter-out $@,$(MAKECMDGOALS)),,echo "$(RED)=== Usage: make script handoffs ===$(RESET)" && exit 1)
@@ -213,6 +220,13 @@ join:
 
 token:
 	@uv run cli token generate --identity $(IDENTITY) --room $(ROOM) --ttl $(TTL)
+
+stt:
+	@echo "$(GREEN)=== STT live mic → Faster-Whisper WS (Ctrl+C to stop) ===$(RESET)"
+	@command -v ffmpeg >/dev/null 2>&1 || { echo "$(RED)ffmpeg not found$(RESET)"; exit 1; }
+	@command -v websocat >/dev/null 2>&1 || { echo "$(RED)websocat not found$(RESET)"; exit 1; }
+	@nc -z localhost $(STT_EXT_PORT) 2>/dev/null || { echo "$(RED)faster-whisper-server not running on port $(STT_EXT_PORT)$(RESET)"; exit 1; }
+	@ffmpeg -loglevel quiet -f alsa -i default -ac 1 -ar 16000 -f s16le - | websocat --binary "ws://localhost:$(STT_EXT_PORT)/v1/audio/transcriptions?language=$(LANGUAGE)"
 
 # -----------------------------------------------------------------------------
 # Cleanup

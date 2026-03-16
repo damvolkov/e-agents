@@ -68,63 +68,6 @@ services:
       livekit:
         condition: service_started
 
-  stt:
-    image: ghcr.io/collabora/whisperlive-gpu:latest
-    container_name: stt
-    hostname: stt
-    ports:
-      - "${STT_PORT:-45120}:9090"
-    volumes:
-      - ./data/stt:/root/.cache/huggingface
-    environment:
-      - WHISPER_MODEL=${STT_WHISPER_MODEL:-large-v3-turbo}
-      - PROVIDER=cuda
-    healthcheck:
-      test: ["CMD", "python", "-c", "import asyncio,websockets; asyncio.run(websockets.connect('ws://localhost:9090').__aenter__())"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
-    networks:
-      - agents
-
-  tts:
-    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
-    container_name: tts
-    hostname: tts
-    ports:
-      - "${TTS_PORT:-45130}:8880"
-    volumes:
-      - ./data/tts:/app/voices
-    environment:
-      - OUTPUT_FORMAT=mp3
-      - DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-af_heart}
-      - USE_GPU=true
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8880/v1/models || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
-    networks:
-      - agents
-
   api:
     build:
       context: .
@@ -140,8 +83,8 @@ services:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_WS_URL=ws://livekit:7880
       - REDIS_URL=redis://redis:6379/0
-      - STT_WS_URL=ws://stt:9090
-      - TTS_BASE_URL=http://tts:8880/v1
+      - STT_BASE_URL=http://host.docker.internal:45120
+      - TTS_BASE_URL=http://host.docker.internal:45130/v1
     command: uvicorn e_agents.main:create_api_app --factory --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]

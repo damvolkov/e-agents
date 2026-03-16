@@ -262,7 +262,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     """Wire session with shared state and start the outer agent."""
     session = AgentSession[SessionState](
         userdata=SessionState(),
-        stt=ProviderRegistry.create_stt("speaches"),
+        stt=ProviderRegistry.create_stt("fwhisper"),
         llm=ProviderRegistry.create_llm("google", model="gemini-2.0-flash"),
         tts=ProviderRegistry.create_tts("kokoro"),
         vad=ctx.proc.userdata["vad"],

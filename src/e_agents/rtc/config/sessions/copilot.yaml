@@ -1,5 +1,5 @@
 name: copilot
-stt: speaches
+stt: fwhisper
 tts: kokoro
 vad: silero
 llm:
