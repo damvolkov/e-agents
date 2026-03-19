@@ -42,8 +42,12 @@ class SearXNGAdapter(Adapter):
         query: str,
         *,
         category: SearchCategory = SearchCategory.GENERAL,
+        max_results: int | None = None,
+        snippet_length: int | None = None,
     ) -> list[SearchResponse]:
         """Execute a SearXNG search and return structured results."""
+        limit = max_results or st.SEARXNG_MAX_RESULTS
+        snip_len = snippet_length or st.SEARXNG_SNIPPET_LENGTH
         params = SearXNGQueryParams(query=query, category=category).to_params()
         async with httpx.AsyncClient(
             base_url=cls._BASE_URL,
@@ -57,7 +61,7 @@ class SearXNGAdapter(Adapter):
             SearchResponse(
                 title=r.get("title", "No title"),
                 url=r.get("url", ""),
-                snippet=r.get("content", "")[:200],
+                snippet=r.get("content", "")[:snip_len],
             )
-            for r in results[: st.SEARXNG_MAX_RESULTS]
+            for r in results[:limit]
         ]

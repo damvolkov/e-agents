@@ -9,17 +9,17 @@ import orjson as json
 import pytest
 from livekit import rtc
 
-from e_agents.rtc.adapters.stt import FasterWhisperSTT
-from e_agents.rtc.adapters.tts import KokoroTTS
+from e_agents.rtc.adapters.stt import EVoiceSTT
+from e_agents.rtc.adapters.tts import EVoiceTTS
 
 
 ##### STT #####
 
 
 @pytest.fixture
-async def stt_adapter() -> AsyncIterator[FasterWhisperSTT]:
-    """FasterWhisperSTT adapter with fake URL for mocked tests."""
-    adapter = FasterWhisperSTT(base_url="http://test-stt:8000", language="en")
+async def stt_adapter() -> AsyncIterator[EVoiceSTT]:
+    """EVoiceSTT adapter with fake URL for mocked tests."""
+    adapter = EVoiceSTT(base_url="http://test-stt:8000", language="en")
     yield adapter
     await adapter.aclose()
 
@@ -52,9 +52,9 @@ def audio_frame() -> rtc.AudioFrame:
 
 
 @pytest.fixture
-async def tts_adapter() -> AsyncIterator[KokoroTTS]:
-    """KokoroTTS adapter with fake URL for mocked tests."""
-    adapter = KokoroTTS(base_url="http://test-tts:8880/v1")
+async def tts_adapter() -> AsyncIterator[EVoiceTTS]:
+    """EVoiceTTS adapter with fake URL for mocked tests."""
+    adapter = EVoiceTTS(base_url="http://test-tts:8880/v1")
     yield adapter
     await adapter.aclose()
 

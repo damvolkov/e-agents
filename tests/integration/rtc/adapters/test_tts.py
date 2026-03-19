@@ -1,4 +1,4 @@
-"""Integration tests for Kokoro TTS — real service at http://localhost:45130."""
+"""Integration tests for EVoice TTS — real service."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from livekit.agents import tts
 
-from e_agents.rtc.adapters.tts import KokoroTTS
+from e_agents.rtc.adapters.tts import EVoiceTTS
 
 _TTS_RATE = 24000
 
@@ -36,7 +36,7 @@ async def _collect_pcm(stream: tts.ChunkedStream) -> bytes:
     ],
     ids=["short", "pangram", "numbers"],
 )
-async def test_tts_synthesize_produces_audio(tts_adapter: KokoroTTS, text: str) -> None:
+async def test_tts_synthesize_produces_audio(tts_adapter: EVoiceTTS, text: str) -> None:
     """TTS produces non-empty PCM with valid signal."""
     pcm = await _collect_pcm(tts_adapter.synthesize(text))
 
@@ -47,7 +47,7 @@ async def test_tts_synthesize_produces_audio(tts_adapter: KokoroTTS, text: str) 
 
 
 @pytest.mark.slow
-async def test_tts_synthesize_long_text(tts_adapter: KokoroTTS) -> None:
+async def test_tts_synthesize_long_text(tts_adapter: EVoiceTTS) -> None:
     """TTS handles longer text without error."""
     text = "This is a longer sentence to test that the text to speech system can handle multiple words and produce a reasonable amount of audio output."
     pcm = await _collect_pcm(tts_adapter.synthesize(text))
@@ -68,7 +68,7 @@ async def test_tts_synthesize_long_text(tts_adapter: KokoroTTS) -> None:
 )
 async def test_tts_voice_produces_audio(voice: str) -> None:
     """Different voices produce valid audio."""
-    adapter = KokoroTTS(voice=voice)
+    adapter = EVoiceTTS(voice=voice)
     pcm = await _collect_pcm(adapter.synthesize("hello world"))
 
     assert len(pcm) > 0, f"Voice '{voice}' produced empty audio"
@@ -81,7 +81,7 @@ async def test_tts_voice_produces_audio(voice: str) -> None:
 
 
 @pytest.mark.slow
-async def test_tts_audio_format(tts_adapter: KokoroTTS) -> None:
+async def test_tts_audio_format(tts_adapter: EVoiceTTS) -> None:
     """PCM output is valid int16 with expected sample rate."""
     pcm = await _collect_pcm(tts_adapter.synthesize("test"))
 
@@ -94,8 +94,8 @@ async def test_tts_audio_format(tts_adapter: KokoroTTS) -> None:
 
 
 @pytest.mark.slow
-async def test_tts_service_reachable(tts_adapter: KokoroTTS) -> None:
-    """Kokoro HTTP endpoint accepts requests and returns audio."""
+async def test_tts_service_reachable(tts_adapter: EVoiceTTS) -> None:
+    """e-voice HTTP endpoint accepts requests and returns audio."""
     pcm = await _collect_pcm(tts_adapter.synthesize("ping"))
     assert len(pcm) > 0
 
@@ -104,7 +104,7 @@ async def test_tts_service_reachable(tts_adapter: KokoroTTS) -> None:
 
 
 @pytest.mark.slow
-async def test_tts_deterministic_output(tts_adapter: KokoroTTS) -> None:
+async def test_tts_deterministic_output(tts_adapter: EVoiceTTS) -> None:
     """Two runs with the same text produce audio of similar length."""
     text = "hello world"
     pcm_a = await _collect_pcm(tts_adapter.synthesize(text))

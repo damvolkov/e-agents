@@ -82,8 +82,8 @@ def agent_cfgs() -> dict[str, AgentConfig]:
 def session_cfg() -> SessionConfig:
     return SessionConfig.model_validate({
         "name": "test",
-        "stt": "whisperlive",
-        "tts": "kokoro",
+        "stt": "evoice",
+        "tts": "evoice",
         "vad": "silero",
         "llm": {"provider": "google", "model": "gemini-2.0-flash"},
         "dispatcher": "assistant",
@@ -96,8 +96,8 @@ def session_cfg() -> SessionConfig:
 def session_cfg_with_queue() -> SessionConfig:
     return SessionConfig.model_validate({
         "name": "queued",
-        "stt": "whisperlive",
-        "tts": "kokoro",
+        "stt": "evoice",
+        "tts": "evoice",
         "vad": "silero",
         "llm": {"provider": "google", "model": "gemini-2.0-flash"},
         "dispatcher": "assistant",

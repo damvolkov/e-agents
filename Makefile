@@ -56,7 +56,7 @@ help:
 	@echo "  $(GREEN)make console$(RESET)      Start agent in console mode (local testing)"
 	@echo "  $(GREEN)make join$(RESET)         Join a room as participant"
 	@echo "  $(GREEN)make token$(RESET)        Generate LiveKit access token"
-	@echo "  $(GREEN)make stt$(RESET)          Live mic → Faster-Whisper WS (requires ffmpeg + websocat)"
+	@echo "  $(GREEN)make stt$(RESET)          Live mic → e-voice STT WS (requires ffmpeg + websocat)"
 	@echo "  $(GREEN)make script$(RESET)       Run a script with infra (SCRIPT=path/to/script.py)"
 	@echo ""
 	@echo "$(BOLD)Variables:$(RESET)"
@@ -150,7 +150,7 @@ infra:
 	@echo "$(CYAN)API: http://localhost:8000$(RESET)"
 	@echo "$(CYAN)Docs: http://localhost:8000/docs$(RESET)"
 	@echo "$(CYAN)LiveKit: ws://localhost:7880$(RESET)"
-	@echo "$(YELLOW)Note: STT/TTS managed by systemd (stt.service, tts.service)$(RESET)"
+	@echo "$(YELLOW)Note: e-voice (STT+TTS) at port $(EVOICE_EXT_PORT) — docker start evoice$(RESET)"
 
 infra-down:
 	@echo "$(YELLOW)=== Stopping all services ===$(RESET)"
@@ -165,10 +165,9 @@ logs:
 # -----------------------------------------------------------------------------
 
 # Service ports (matching e-core registry defaults)
-REDIS_EXT_PORT  ?= 6379
+REDIS_EXT_PORT   ?= 45000
 LIVEKIT_EXT_PORT ?= 7880
-STT_EXT_PORT    ?= 45120
-TTS_EXT_PORT    ?= 45130
+EVOICE_EXT_PORT  ?= 45140
 
 run: _ensure-deps
 	@echo "$(GREEN)=== Starting Agent Server (session=$(SESSION)) ===$(RESET)"
@@ -189,25 +188,30 @@ _ensure-deps:
 			docker compose -f $(COMPOSE_FILE) up -d $$svc; \
 		fi; \
 	done; \
-	for pair in "$(STT_EXT_PORT):stt" "$(TTS_EXT_PORT):tts"; do \
-		port=$${pair%%:*}; svc=$${pair##*:}; \
-		if nc -z localhost $$port 2>/dev/null; then \
-			echo "$(GREEN)  ✓ $$svc (port $$port)$(RESET)"; \
-		else \
-			fail=true; \
-			echo "$(RED)  ✗ $$svc (port $$port) — run: systemctl --user start $$svc$(RESET)"; \
-		fi; \
-	done; \
+	if nc -z localhost $(EVOICE_EXT_PORT) 2>/dev/null; then \
+		echo "$(GREEN)  ✓ evoice (port $(EVOICE_EXT_PORT))$(RESET)"; \
+	else \
+		fail=true; \
+		echo "$(RED)  ✗ evoice (port $(EVOICE_EXT_PORT)) — run: docker start evoice$(RESET)"; \
+	fi; \
 	if [ "$$fail" = true ]; then \
-		echo "$(RED)=== Missing systemd services — see above ===$(RESET)"; \
+		echo "$(RED)=== Missing services — see above ===$(RESET)"; \
 		exit 1; \
 	fi; \
 	echo "$(GREEN)=== All services running ===$(RESET)"
 
-script: _ensure-deps
+script: _ensure-media
 	@$(if $(filter-out $@,$(MAKECMDGOALS)),,echo "$(RED)=== Usage: make script handoffs ===$(RESET)" && exit 1)
 	@echo "$(GREEN)=== Running scripts/$(filter-out $@,$(MAKECMDGOALS)).py ===$(RESET)"
 	@uv run scripts/$(filter-out $@,$(MAKECMDGOALS)).py
+
+_ensure-media:
+	@if nc -z localhost $(EVOICE_EXT_PORT) 2>/dev/null; then \
+		echo "$(GREEN)  ✓ evoice (port $(EVOICE_EXT_PORT))$(RESET)"; \
+	else \
+		echo "$(RED)  ✗ evoice (port $(EVOICE_EXT_PORT)) — run: docker start evoice$(RESET)"; \
+		exit 1; \
+	fi
 
 # Join variables
 IDENTITY ?= user
@@ -222,11 +226,11 @@ token:
 	@uv run cli token generate --identity $(IDENTITY) --room $(ROOM) --ttl $(TTL)
 
 stt:
-	@echo "$(GREEN)=== STT live mic → Faster-Whisper WS (Ctrl+C to stop) ===$(RESET)"
+	@echo "$(GREEN)=== STT live mic → e-voice WS (Ctrl+C to stop) ===$(RESET)"
 	@command -v ffmpeg >/dev/null 2>&1 || { echo "$(RED)ffmpeg not found$(RESET)"; exit 1; }
 	@command -v websocat >/dev/null 2>&1 || { echo "$(RED)websocat not found$(RESET)"; exit 1; }
-	@nc -z localhost $(STT_EXT_PORT) 2>/dev/null || { echo "$(RED)faster-whisper-server not running on port $(STT_EXT_PORT)$(RESET)"; exit 1; }
-	@ffmpeg -loglevel quiet -f alsa -i default -ac 1 -ar 16000 -f s16le - | websocat --binary "ws://localhost:$(STT_EXT_PORT)/v1/audio/transcriptions?language=$(LANGUAGE)"
+	@nc -z localhost $(EVOICE_EXT_PORT) 2>/dev/null || { echo "$(RED)e-voice not running on port $(EVOICE_EXT_PORT)$(RESET)"; exit 1; }
+	@ffmpeg -loglevel quiet -f alsa -i default -ac 1 -ar 16000 -f s16le - | websocat --binary "ws://localhost:$(EVOICE_EXT_PORT)/v1/audio/transcriptions?language=$(LANGUAGE)"
 
 # -----------------------------------------------------------------------------
 # Cleanup

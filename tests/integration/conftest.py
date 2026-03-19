@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from livekit import rtc
 
-from e_agents.rtc.adapters.stt import FasterWhisperSTT
-from e_agents.rtc.adapters.tts import KokoroTTS
+from e_agents.rtc.adapters.stt import EVoiceSTT
+from e_agents.rtc.adapters.tts import EVoiceTTS
 
 _RESOURCES = Path(__file__).parent.parent / "resources"
 
@@ -60,16 +60,16 @@ def sample_wav_bytes() -> bytes:
 
 
 @pytest.fixture
-async def stt_adapter() -> AsyncIterator[FasterWhisperSTT]:
-    """FasterWhisperSTT pointing to real local service."""
-    adapter = FasterWhisperSTT()
+async def stt_adapter() -> AsyncIterator[EVoiceSTT]:
+    """EVoiceSTT pointing to real local service."""
+    adapter = EVoiceSTT()
     yield adapter
     await adapter.aclose()
 
 
 @pytest.fixture
-async def tts_adapter() -> AsyncIterator[KokoroTTS]:
-    """KokoroTTS pointing to real local service."""
-    adapter = KokoroTTS()
+async def tts_adapter() -> AsyncIterator[EVoiceTTS]:
+    """EVoiceTTS pointing to real local service."""
+    adapter = EVoiceTTS()
     yield adapter
     await adapter.aclose()

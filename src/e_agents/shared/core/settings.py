@@ -60,7 +60,7 @@ class Settings(RTCSettings, APISettings, CLISettings):
 
     ##### LANGUAGE #####
 
-    USER_LANGUAGE: str = "en"
+    USER_LANGUAGE: str = "es"
 
     ##### SHARED INFRASTRUCTURE #####
 
@@ -77,11 +77,12 @@ class Settings(RTCSettings, APISettings, CLISettings):
     ADAPTERS_TIMEOUT: float = 15.0
 
     # SearXNG (used by shared/adapters and rtc/tools)
-    SEARXNG_URL: AnyHttpUrl = "http://localhost:7700"
+    SEARXNG_URL: AnyHttpUrl = "http://localhost:45600"
     SEARXNG_FORMAT: ClassVar[str] = "json"
     SEARXNG_LANGUAGE: ClassVar[str] = "all"
     SEARXNG_SAFESEARCH: ClassVar[int] = 0
     SEARXNG_MAX_RESULTS: ClassVar[int] = 5
+    SEARXNG_SNIPPET_LENGTH: ClassVar[int] = 300
 
     ##### COMPUTED #####
 

@@ -126,8 +126,8 @@ async def test_agent_config_full_fields(agent_full_raw: dict[str, Any]) -> None:
     assert cfg.tool_names == ["tool_a", "tool_b"]
     assert cfg.mcp_servers == ["context7", "filesystem"]
     assert cfg.handoff_targets == ["other_agent"]
-    assert cfg.stt == STTBackend.WHISPERLIVE
-    assert cfg.tts == TTSBackend.KOKORO
+    assert cfg.stt == STTBackend.EVOICE
+    assert cfg.tts == TTSBackend.EVOICE
     assert cfg.vad == VADBackend.SILERO
     assert cfg.turn_detection == TurnDetection.SERVER_VAD
     assert cfg.allow_interruptions is True

@@ -1,6 +1,6 @@
 name: simple
-stt: fwhisper
-tts: kokoro
+stt: evoice
+tts: evoice
 vad: silero
 llm:
   provider: google

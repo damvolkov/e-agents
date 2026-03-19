@@ -7,6 +7,7 @@ instructions: |
   When your analysis is complete, transfer back to the concierge
   with your findings.
 tools:
+  - web_fetch
   - name: web_search
     execution:
       mode: background

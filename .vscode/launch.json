@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Console (web)",
+            "name": "dev console",
             "type": "debugpy",
             "request": "launch",
             "module": "e_agents.cli.main",
@@ -12,11 +12,10 @@
                 "PYTHONPATH": "${workspaceFolder}/src"
             },
             "justMyCode": false,
-            "console": "integratedTerminal",
-            "preLaunchTask": "ensure-deps"
+            "console": "integratedTerminal"
         },
         {
-            "name": "Run (web)",
+            "name": "dev server",
             "type": "debugpy",
             "request": "launch",
             "module": "e_agents.cli.main",
@@ -26,11 +25,106 @@
                 "PYTHONPATH": "${workspaceFolder}/src"
             },
             "justMyCode": false,
-            "console": "integratedTerminal",
-            "preLaunchTask": "ensure-deps"
+            "console": "integratedTerminal"
         },
         {
-            "name": "Session List",
+            "name": "script simple",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/simple.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "script search",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/search.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "script triage",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/triage.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "script striage",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/striage.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "script dsolver",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/dsolver.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "script arch1",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/arch1.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "script experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/experiment.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "script handoffs",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/handoffs.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "cli session list",
             "type": "debugpy",
             "request": "launch",
             "module": "e_agents.cli.main",
@@ -43,31 +137,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Script: experiment",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/scripts/experiment.py",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}/src"
-            },
-            "justMyCode": false,
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Script: triage",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/scripts/triage.py",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}/src"
-            },
-            "justMyCode": false,
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Docker Attach",
+            "name": "docker attach",
             "type": "debugpy",
             "request": "attach",
             "connect": {

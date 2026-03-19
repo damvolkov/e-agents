@@ -8,7 +8,7 @@ from livekit.agents import tts
 from pytest_audioeval.metrics.audio import AudioMetrics
 from scipy.signal import resample as scipy_resample
 
-from e_agents.rtc.adapters.tts import KokoroTTS
+from e_agents.rtc.adapters.tts import EVoiceTTS
 
 _TTS_RATE = 24000
 _PESQ_RATE = 16000
@@ -52,7 +52,7 @@ def _resample_float(pcm: bytes, from_rate: int, to_rate: int) -> np.ndarray:
 )
 async def test_tts_audio_valid_pcm(text: str) -> None:
     """TTS produces non-empty PCM with reasonable amplitude and duration."""
-    adapter = KokoroTTS()
+    adapter = EVoiceTTS()
     pcm = await _collect_pcm(adapter.synthesize(text))
     audio = np.frombuffer(pcm, dtype=np.int16)
 
@@ -70,7 +70,7 @@ async def test_tts_audio_valid_pcm(text: str) -> None:
 @pytest.mark.slow
 async def test_tts_pesq_consistency() -> None:
     """Two TTS runs of same text produce perceptually similar audio (PESQ >= threshold)."""
-    adapter = KokoroTTS()
+    adapter = EVoiceTTS()
     text = "the quick brown fox jumps over the lazy dog"
 
     pcm_a = await _collect_pcm(adapter.synthesize(text))

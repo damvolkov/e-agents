@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings
 
 
 class STTBackend(StrEnum):
+    EVOICE = auto()
     FWHISPER = auto()
     WHISPERLIVE = auto()
     OPENAI = auto()
@@ -18,6 +19,7 @@ class STTBackend(StrEnum):
 
 
 class TTSBackend(StrEnum):
+    EVOICE = auto()
     KOKORO = auto()
     OPENAI = auto()
     GOOGLE = auto()
@@ -42,15 +44,15 @@ class AgentRole(StrEnum):
 class RTCSettings(BaseSettings):
     """Settings for the LiveKit WebRTC server module."""
 
-    # STT (faster-whisper-server — OpenAI-compatible)
-    STT_BASE_URL: AnyHttpUrl = "http://localhost:45120"
-    STT_MODEL: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
+    # STT (e-voice — WebSocket streaming + HTTP batch)
+    STT_BASE_URL: AnyHttpUrl = "http://localhost:45140"
+    STT_MODEL: str = "large-v3-turbo"
     STT_TIMEOUT: float = 30.0
 
-    # TTS (Kokoro OpenAI-compatible)
-    TTS_BASE_URL: AnyHttpUrl = "http://localhost:45130/v1"
+    # TTS (e-voice — OpenAI-compatible chunked streaming)
+    TTS_BASE_URL: AnyHttpUrl = "http://localhost:45140/v1"
     TTS_MODEL: str = "kokoro"
-    TTS_VOICE: str = "af_heart"
+    TTS_VOICE: str = "ef_dora"
 
     # LLM
     OPENAI_API_KEY: SecretStr = ""

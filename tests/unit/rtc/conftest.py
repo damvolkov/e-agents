@@ -39,9 +39,9 @@ def agent_full_raw() -> dict[str, Any]:
         "tools": ["tool_a", "tool_b"],
         "mcp_servers": ["context7", "filesystem"],
         "handoffs": ["other_agent"],
-        "stt": "whisperlive",
+        "stt": "evoice",
         "llm": {"provider": "google", "model": "gemini-2.0-flash"},
-        "tts": "kokoro",
+        "tts": "evoice",
         "vad": "silero",
         "turn_detection": "server_vad",
         "allow_interruptions": True,
@@ -91,8 +91,8 @@ def session_web_raw() -> dict[str, Any]:
     """Config matching config/sessions/web.yaml."""
     return {
         "name": "web",
-        "stt": "fwhisper",
-        "tts": "kokoro",
+        "stt": "evoice",
+        "tts": "evoice",
         "vad": "silero",
         "llm": {"provider": "google", "model": "gemini-2.0-flash"},
         "max_tool_steps": 10,
@@ -115,8 +115,8 @@ def session_full_raw() -> dict[str, Any]:
     """Session with every optional field populated."""
     return {
         "name": "full_session",
-        "stt": "fwhisper",
-        "tts": "kokoro",
+        "stt": "evoice",
+        "tts": "evoice",
         "vad": "silero",
         "llm": {"provider": "openai", "model": "gpt-4o"},
         "llm_fast": {"provider": "openai", "model": "gpt-4o-mini"},

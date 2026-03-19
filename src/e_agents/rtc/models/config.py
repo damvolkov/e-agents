@@ -141,8 +141,8 @@ class SessionConfig(BaseModelYAML):
 
     name: str
 
-    stt: STTBackend = STTBackend.FWHISPER
-    tts: TTSBackend = TTSBackend.KOKORO
+    stt: STTBackend = STTBackend.EVOICE
+    tts: TTSBackend = TTSBackend.EVOICE
     vad: VADBackend = VADBackend.SILERO
     llm: str | LLMConfig = Field(default_factory=LLMConfig)
     llm_fast: str | LLMConfig | None = None

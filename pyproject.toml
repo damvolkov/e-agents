@@ -46,6 +46,8 @@ dependencies = [
     "mcp>=1.26.0",
     "cyclopts>=4.8.0",
     "rich>=14.2.0",
+    "livekit[openai]>=1.0.23",
+    "trafilatura>=2.0.0",
 ]
 
 [project.scripts]

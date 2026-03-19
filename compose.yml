@@ -41,9 +41,7 @@ services:
     restart: unless-stopped
     networks:
       - agents
-    depends_on:
-      redis:
-        condition: service_healthy
+      - e-core
 
   sip:
     image: livekit/sip:latest
@@ -83,8 +81,8 @@ services:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_WS_URL=ws://livekit:7880
       - REDIS_URL=redis://redis:6379/0
-      - STT_BASE_URL=http://host.docker.internal:45120
-      - TTS_BASE_URL=http://host.docker.internal:45130/v1
+      - STT_BASE_URL=http://host.docker.internal:45140
+      - TTS_BASE_URL=http://host.docker.internal:45140/v1
     command: uvicorn e_agents.main:create_api_app --factory --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
@@ -102,3 +100,5 @@ services:
 networks:
   agents:
     driver: bridge
+  e-core:
+    external: true

@@ -1,4 +1,4 @@
-"""Integration tests for FasterWhisper STT — real service at http://localhost:45120."""
+"""Integration tests for EVoice STT — real service."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from livekit.agents import tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from scipy.signal import resample as scipy_resample
 
-from e_agents.rtc.adapters.stt import FasterWhisperSTT
-from e_agents.rtc.adapters.tts import KokoroTTS
+from e_agents.rtc.adapters.stt import EVoiceSTT
+from e_agents.rtc.adapters.tts import EVoiceTTS
 
 _TTS_RATE = 24000
 _STT_RATE = 16000
@@ -30,8 +30,8 @@ def _build_frame(pcm: bytes, rate: int = _STT_RATE, channels: int = 1) -> rtc.Au
 
 
 async def _tts_to_pcm(text: str) -> bytes:
-    """Generate speech via Kokoro TTS and return raw PCM."""
-    adapter = KokoroTTS()
+    """Generate speech via EVoice TTS and return raw PCM."""
+    adapter = EVoiceTTS()
     chunks: list[bytes] = []
     async with adapter.synthesize(text) as stream:
         async for ev in stream:
@@ -75,7 +75,7 @@ async def test_stt_batch_recognize_speech(text: str) -> None:
     pcm_16k = _resample(pcm_24k, _TTS_RATE, _STT_RATE)
     frame = _build_frame(pcm_16k)
 
-    adapter = FasterWhisperSTT(language="en")
+    adapter = EVoiceSTT(language="en")
     result = await adapter._recognize_impl([frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.type.name == "FINAL_TRANSCRIPT"
@@ -85,7 +85,7 @@ async def test_stt_batch_recognize_speech(text: str) -> None:
 
 
 @pytest.mark.slow
-async def test_stt_batch_recognize_silence(stt_adapter: FasterWhisperSTT) -> None:
+async def test_stt_batch_recognize_silence(stt_adapter: EVoiceSTT) -> None:
     """Batch recognition of silence returns without error."""
     silence = b"\x00\x00" * _STT_RATE
     frame = _build_frame(silence)
@@ -96,7 +96,7 @@ async def test_stt_batch_recognize_silence(stt_adapter: FasterWhisperSTT) -> Non
 
 
 @pytest.mark.slow
-async def test_stt_batch_recognize_tone(stt_adapter: FasterWhisperSTT) -> None:
+async def test_stt_batch_recognize_tone(stt_adapter: EVoiceSTT) -> None:
     """Batch recognition of a pure tone completes without error."""
     tone = _generate_tone(440.0, 1.0)
     frame = _build_frame(tone)
@@ -117,7 +117,7 @@ async def test_stt_batch_language_override(language: str) -> None:
     pcm_16k = _resample(pcm_24k, _TTS_RATE, _STT_RATE)
     frame = _build_frame(pcm_16k)
 
-    adapter = FasterWhisperSTT(language=language)
+    adapter = EVoiceSTT(language=language)
     result = await adapter._recognize_impl([frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.alternatives[0].language == language
@@ -128,8 +128,8 @@ async def test_stt_batch_language_override(language: str) -> None:
 
 
 @pytest.mark.slow
-async def test_stt_service_reachable(stt_adapter: FasterWhisperSTT, sample_pcm_frame: rtc.AudioFrame) -> None:
-    """FasterWhisper REST endpoint accepts connection and responds."""
+async def test_stt_service_reachable(stt_adapter: EVoiceSTT, sample_pcm_frame: rtc.AudioFrame) -> None:
+    """e-voice HTTP endpoint accepts connection and responds."""
     result = await stt_adapter._recognize_impl([sample_pcm_frame], conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.type.name == "FINAL_TRANSCRIPT"
@@ -152,7 +152,7 @@ async def test_stt_batch_multiple_frames() -> None:
         _build_frame(pcm_16k[chunk_size * 2 :]),
     ]
 
-    adapter = FasterWhisperSTT(language="en")
+    adapter = EVoiceSTT(language="en")
     result = await adapter._recognize_impl(frames, conn_options=DEFAULT_API_CONNECT_OPTIONS)
 
     assert result.type.name == "FINAL_TRANSCRIPT"

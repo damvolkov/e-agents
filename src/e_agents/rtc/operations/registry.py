@@ -12,8 +12,8 @@ from typing import Any, ClassVar
 
 from livekit.agents import stt, tts
 
-from e_agents.rtc.adapters.stt import FasterWhisperSTT, WhisperLiveSTT
-from e_agents.rtc.adapters.tts import KokoroTTS
+from e_agents.rtc.adapters.stt import EVoiceSTT, FasterWhisperSTT, WhisperLiveSTT
+from e_agents.rtc.adapters.tts import EVoiceTTS, KokoroTTS
 from e_agents.rtc.core.settings import STTBackend, TTSBackend
 from e_agents.shared.core.logger import LogIcon, logger
 from e_agents.shared.models import LLMProvider
@@ -28,10 +28,14 @@ class ProviderRegistry:
     """Central registry for STT, TTS, LLM and VAD providers."""
 
     _stt: ClassVar[dict[STTBackend, type]] = {
+        STTBackend.EVOICE: EVoiceSTT,
         STTBackend.FWHISPER: FasterWhisperSTT,
         STTBackend.WHISPERLIVE: WhisperLiveSTT,
     }
-    _tts: ClassVar[dict[TTSBackend, type]] = {TTSBackend.KOKORO: KokoroTTS}
+    _tts: ClassVar[dict[TTSBackend, type]] = {
+        TTSBackend.EVOICE: EVoiceTTS,
+        TTSBackend.KOKORO: KokoroTTS,
+    }
     _llm: ClassVar[dict[LLMProvider, type]] = {}
     _populated: ClassVar[bool] = False
 

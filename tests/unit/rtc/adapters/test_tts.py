@@ -1,4 +1,4 @@
-"""Unit tests for Kokoro TTS adapter (mocked HTTP)."""
+"""Unit tests for EVoice TTS adapter (mocked HTTP)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from e_agents.rtc.adapters.tts import KokoroChunkedStream, KokoroTTS
+from e_agents.rtc.adapters.tts import EVoiceChunkedStream, EVoiceTTS
 
 ##### INIT & PROPERTIES #####
 
@@ -15,25 +15,25 @@ from e_agents.rtc.adapters.tts import KokoroChunkedStream, KokoroTTS
 @pytest.mark.parametrize(
     ("base_url", "model", "voice"),
     [
-        ("http://localhost:45130/v1", "kokoro", "af_heart"),
+        ("http://localhost:45140/v1", "kokoro", "af_heart"),
         ("http://tts:8880/v1", "kokoro", "bf_emma"),
         ("http://192.168.1.100:8880/v1", "kokoro", "am_michael"),
     ],
     ids=["local", "docker", "remote"],
 )
 async def test_tts_init_config(base_url: str, model: str, voice: str) -> None:
-    tts = KokoroTTS(base_url=base_url, model=model, voice=voice)
+    tts = EVoiceTTS(base_url=base_url, model=model, voice=voice)
     assert tts._base_url == base_url.rstrip("/")
     assert tts._model == model
     assert tts._voice == voice
 
 
-async def test_tts_provider_and_model(tts_adapter: KokoroTTS) -> None:
-    assert tts_adapter.provider == "kokoro"
-    assert tts_adapter.model.startswith("kokoro/")
+async def test_tts_provider_and_model(tts_adapter: EVoiceTTS) -> None:
+    assert tts_adapter.provider == "evoice"
+    assert tts_adapter.model.startswith("evoice/")
 
 
-async def test_tts_capabilities(tts_adapter: KokoroTTS) -> None:
+async def test_tts_capabilities(tts_adapter: EVoiceTTS) -> None:
     assert tts_adapter.capabilities.streaming is False
 
 
@@ -47,7 +47,7 @@ async def test_tts_capabilities(tts_adapter: KokoroTTS) -> None:
     ids=["24k-mono", "16k-mono", "44k-stereo"],
 )
 async def test_tts_audio_properties(sample_rate: int, num_channels: int) -> None:
-    tts = KokoroTTS(sample_rate=sample_rate, num_channels=num_channels)
+    tts = EVoiceTTS(sample_rate=sample_rate, num_channels=num_channels)
     assert tts.sample_rate == sample_rate
     assert tts.num_channels == num_channels
     await tts.aclose()
@@ -61,13 +61,13 @@ async def test_tts_audio_properties(sample_rate: int, num_channels: int) -> None
     ["Hello world", "Test with numbers 123", "Special chars: !@#$%", ""],
     ids=["simple", "numbers", "special", "empty"],
 )
-async def test_synthesize_returns_stream(tts_adapter: KokoroTTS, text: str) -> None:
+async def test_synthesize_returns_stream(tts_adapter: EVoiceTTS, text: str) -> None:
     stream = tts_adapter.synthesize(text)
-    assert isinstance(stream, KokoroChunkedStream)
+    assert isinstance(stream, EVoiceChunkedStream)
 
 
 async def test_synthesize_stream_with_mock(
-    tts_adapter: KokoroTTS,
+    tts_adapter: EVoiceTTS,
     mock_pcm_chunk: bytes,
 ) -> None:
     mock_response = AsyncMock()
@@ -90,7 +90,7 @@ async def test_synthesize_stream_with_mock(
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("e_agents.rtc.adapters.tts.kokoro.httpx.AsyncClient", return_value=mock_client):
+    with patch("e_agents.rtc.adapters.tts.evoice.httpx.AsyncClient", return_value=mock_client):
         stream = tts_adapter.synthesize("Hello world")
 
         chunks_received = []
@@ -105,6 +105,6 @@ async def test_synthesize_stream_with_mock(
 ##### LIFECYCLE #####
 
 
-async def test_aclose_is_noop(tts_adapter: KokoroTTS) -> None:
+async def test_aclose_is_noop(tts_adapter: EVoiceTTS) -> None:
     await tts_adapter.aclose()
     await tts_adapter.aclose()

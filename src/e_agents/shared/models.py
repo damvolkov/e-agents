@@ -92,22 +92,43 @@ class SearchResponse:
 
 
 class SearchCategory(StrEnum):
-    """SearXNG search categories."""
+    """SearXNG search categories — sourced from /config endpoint."""
 
     @staticmethod
     def _generate_next_value_(name: str, *_: object) -> str:
         return name.lower().replace("_", " ")
 
     GENERAL = auto()
-    IT = auto()
+    WEB = auto()
     NEWS = auto()
-    MAP = auto()
-    MUSIC = auto()
-    FILES = auto()
     IMAGES = auto()
     VIDEOS = auto()
-    SOCIAL_MEDIA = auto()
+    MUSIC = auto()
+    IT = auto()
     SCIENCE = auto()
+    SCIENTIFIC_PUBLICATIONS = auto()
+    FILES = auto()
+    SOCIAL_MEDIA = auto()
+    MAP = auto()
+    APPS = auto()
+    BOOKS = auto()
+    PACKAGES = auto()
+    REPOS = auto()
+    SOFTWARE_WIKIS = auto()
+    SHOPPING = auto()
+    WEATHER = auto()
+    DICTIONARIES = auto()
+    TRANSLATE = auto()
+    LYRICS = auto()
+    MOVIES = auto()
+    RADIO = auto()
+    CURRENCY = auto()
+    ICONS = auto()
+    Q_AND_A = "q&a"
+    WIKIMEDIA = auto()
+    CARGO = auto()
+    DEFINE = auto()
+    OTHER = auto()
 
 
 class LLMProvider(StrEnum):

@@ -8,5 +8,6 @@ instructions: |
   the assistant.
 tools:
   - web_search
+  - web_fetch
 handoffs:
   - assistant

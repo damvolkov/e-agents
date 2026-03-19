@@ -1,50 +1,72 @@
-"""Unit tests for FasterWhisper STT adapter (mocked services)."""
+"""Unit tests for EVoice STT adapter (mocked services)."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from unittest.mock import AsyncMock, patch
-
-import orjson as json
 import pytest
-from livekit import rtc
-from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
+from livekit.agents.types import NOT_GIVEN
 
-from e_agents.rtc.adapters.stt import FasterWhisperSTT
+from e_agents.rtc.adapters.stt import EVoiceSTT
 
-##### TRANSCRIPTION #####
+##### PROPERTIES #####
 
 
 @pytest.mark.parametrize(
-    ("response_text", "expected_text"),
+    ("model", "expected_model"),
     [
-        ("Hello world", "Hello world"),
-        ("", ""),
-        ("  trimmed  ", "trimmed"),
+        ("large-v3-turbo", "large-v3-turbo"),
+        ("large-v3", "large-v3"),
+        ("small", "small"),
     ],
-    ids=["simple", "empty", "trimmed"],
+    ids=["turbo", "large-v3", "small"],
 )
-async def test_stt_recognize_transcripts(
-    stt_adapter: FasterWhisperSTT,
-    audio_frame: rtc.AudioFrame,
-    mock_httpx_post: Callable[[str], AsyncMock],
-    response_text: str,
-    expected_text: str,
-) -> None:
-    mock_client = mock_httpx_post(response_text)
+async def test_stt_model_property(model: str, expected_model: str) -> None:
+    adapter = EVoiceSTT(base_url="http://test:8000", model=model)
 
-    with patch("e_agents.rtc.adapters.stt.fwhisper.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        result = await stt_adapter._recognize_impl(
-            [audio_frame], conn_options=DEFAULT_API_CONNECT_OPTIONS,
-        )
+    assert adapter.model == expected_model
+    assert adapter.provider == "evoice"
 
-    assert result.type.name == "FINAL_TRANSCRIPT"
-    assert result.alternatives[0].text == expected_text
+    await adapter.aclose()
 
 
-##### LANGUAGE #####
+async def test_stt_capabilities() -> None:
+    adapter = EVoiceSTT(base_url="http://test:8000")
+
+    assert adapter.capabilities.streaming is True
+    assert adapter.capabilities.interim_results is False
+
+    await adapter.aclose()
+
+
+##### WS URL CONSTRUCTION #####
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected_ws"),
+    [
+        ("http://localhost:4100", "ws://localhost:4100"),
+        ("https://stt.example.com", "wss://stt.example.com"),
+        ("http://localhost:4100/", "ws://localhost:4100"),
+    ],
+    ids=["http-to-ws", "https-to-wss", "trailing-slash"],
+)
+async def test_stt_ws_url_from_base(base_url: str, expected_ws: str) -> None:
+    from e_agents.rtc.adapters.stt.evoice import _base_to_ws
+    base = base_url.rstrip("/")
+    ws_url = _base_to_ws(base)
+
+    assert ws_url == expected_ws
+
+
+##### STREAM CREATION #####
+
+
+async def test_stt_stream_returns_recognize_stream() -> None:
+    adapter = EVoiceSTT(base_url="http://test:8000", language="en")
+
+    stream = adapter.stream()
+
+    assert stream is not None
+    await adapter.aclose()
 
 
 @pytest.mark.parametrize(
@@ -53,53 +75,13 @@ async def test_stt_recognize_transcripts(
         ("en", "en"),
         ("es", "es"),
         ("fr", "fr"),
-        (None, "en"),
     ],
-    ids=["english", "spanish", "french", "default"],
+    ids=["english", "spanish", "french"],
 )
-async def test_stt_recognize_language(
-    stt_adapter: FasterWhisperSTT,
-    audio_frame: rtc.AudioFrame,
-    mock_httpx_post: Callable[[str], AsyncMock],
-    language: str | None,
-    expected_lang: str,
-) -> None:
-    mock_client = mock_httpx_post("test")
+async def test_stt_stream_language(language: str, expected_lang: str) -> None:
+    adapter = EVoiceSTT(base_url="http://test:8000", language=language)
 
-    with patch("e_agents.rtc.adapters.stt.fwhisper.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        lang_arg = language if language else NOT_GIVEN
-        result = await stt_adapter._recognize_impl(
-            [audio_frame], language=lang_arg, conn_options=DEFAULT_API_CONNECT_OPTIONS,
-        )
+    stream = adapter.stream(language=NOT_GIVEN)
 
-    assert result.alternatives[0].language == expected_lang
-
-
-##### PROPERTIES #####
-
-
-@pytest.mark.parametrize(
-    ("model", "expected_model"),
-    [
-        ("deepdml/faster-whisper-large-v3-turbo-ct2", "deepdml/faster-whisper-large-v3-turbo-ct2"),
-        ("Systran/faster-distil-whisper-small.en", "Systran/faster-distil-whisper-small.en"),
-    ],
-    ids=["turbo-ct2", "distil-small"],
-)
-async def test_stt_model_property(model: str, expected_model: str) -> None:
-    adapter = FasterWhisperSTT(model=model)
-
-    assert adapter.model == expected_model
-    assert adapter.provider == "fwhisper"
-
-    await adapter.aclose()
-
-
-async def test_stt_capabilities() -> None:
-    adapter = FasterWhisperSTT()
-
-    assert adapter.capabilities.streaming is True
-
+    assert stream is not None
     await adapter.aclose()

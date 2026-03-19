@@ -1,6 +1,6 @@
 name: web
-stt: fwhisper
-tts: kokoro
+stt: evoice
+tts: evoice
 vad: silero
 llm:
   provider: google

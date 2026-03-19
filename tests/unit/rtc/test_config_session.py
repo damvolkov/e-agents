@@ -17,11 +17,11 @@ from e_agents.shared.models import LLMConfig, LLMProvider
 
 _SESSION_CASES = [
     pytest.param(
-        {"name": "web", "stt": "whisperlive", "tts": "kokoro", "dispatcher": "a", "agents": ["a"]},
+        {"name": "web", "stt": "evoice", "tts": "evoice", "dispatcher": "a", "agents": ["a"]},
         id="web-like",
     ),
     pytest.param(
-        {"name": "voice", "stt": "whisperlive", "llm": {"provider": "openai", "model": "gpt-4o"}},
+        {"name": "voice", "stt": "evoice", "llm": {"provider": "openai", "model": "gpt-4o"}},
         id="voice-with-llm-object",
     ),
     pytest.param(
@@ -42,8 +42,8 @@ async def test_session_config_validates(data: dict[str, Any]) -> None:
 
 async def test_session_config_defaults() -> None:
     cfg = SessionConfig(name="defaults")
-    assert cfg.stt == STTBackend.FWHISPER
-    assert cfg.tts == TTSBackend.KOKORO
+    assert cfg.stt == STTBackend.EVOICE
+    assert cfg.tts == TTSBackend.EVOICE
     assert cfg.vad == VADBackend.SILERO
     assert isinstance(cfg.llm, LLMConfig)
     assert cfg.llm.provider == LLMProvider.OPENAI
@@ -128,8 +128,8 @@ async def test_session_config_task_queue_full(session_full_raw: dict[str, Any]) 
 async def test_session_config_full_fields(session_full_raw: dict[str, Any]) -> None:
     cfg = SessionConfig.model_validate(session_full_raw)
     assert cfg.name == "full_session"
-    assert cfg.stt == STTBackend.FWHISPER
-    assert cfg.tts == TTSBackend.KOKORO
+    assert cfg.stt == STTBackend.EVOICE
+    assert cfg.tts == TTSBackend.EVOICE
     assert cfg.vad == VADBackend.SILERO
     assert cfg.turn_detection == TurnDetection.SERVER_VAD
     assert isinstance(cfg.llm, LLMConfig)
@@ -249,8 +249,8 @@ async def test_session_config_from_yaml_file(tmp_path: Path) -> None:
     yaml_file = tmp_path / "test_session.yaml"
     yaml_file.write_text(
         "name: file_session\n"
-        "stt: fwhisper\n"
-        "tts: kokoro\n"
+        "stt: evoice\n"
+        "tts: evoice\n"
         "llm:\n"
         "  provider: google\n"
         "  model: gemini-2.0-flash\n"
@@ -261,7 +261,7 @@ async def test_session_config_from_yaml_file(tmp_path: Path) -> None:
     )
     cfg = SessionConfig.from_yaml(yaml_file)
     assert cfg.name == "file_session"
-    assert cfg.stt == STTBackend.FWHISPER
+    assert cfg.stt == STTBackend.EVOICE
     assert isinstance(cfg.llm, LLMConfig)
     assert cfg.llm.provider == LLMProvider.GOOGLE
     assert cfg.dispatcher == "main"
@@ -274,8 +274,8 @@ async def test_session_config_from_yaml_file(tmp_path: Path) -> None:
 async def test_session_web_fixture(session_web_raw: dict[str, Any]) -> None:
     cfg = SessionConfig.model_validate(session_web_raw)
     assert cfg.name == "web"
-    assert cfg.stt == STTBackend.FWHISPER
-    assert cfg.tts == TTSBackend.KOKORO
+    assert cfg.stt == STTBackend.EVOICE
+    assert cfg.tts == TTSBackend.EVOICE
     assert cfg.dispatcher == "assistant"
     assert len(cfg.agents) == 2
 
@@ -283,7 +283,7 @@ async def test_session_web_fixture(session_web_raw: dict[str, Any]) -> None:
 async def test_session_minimal_fixture(session_minimal_raw: dict[str, Any]) -> None:
     cfg = SessionConfig.model_validate(session_minimal_raw)
     assert cfg.name == "minimal"
-    assert cfg.stt == STTBackend.FWHISPER
+    assert cfg.stt == STTBackend.EVOICE
     assert cfg.agents == []
 
 
@@ -292,4 +292,4 @@ async def test_session_minimal_fixture(session_minimal_raw: dict[str, Any]) -> N
 
 async def test_session_config_rejects_missing_name() -> None:
     with pytest.raises(ValidationError):
-        SessionConfig.model_validate({"stt": "whisperlive"})
+        SessionConfig.model_validate({"stt": "evoice"})
