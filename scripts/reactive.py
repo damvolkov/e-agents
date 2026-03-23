@@ -1,361 +1,283 @@
-"""Reactive session architecture — console prototype.
+"""ReactiveSession prototype — LiveKit voice/text chat with policy-driven orchestration.
 
-Framework-agnostic reactive state machine that observes events,
-evaluates policies, and acts on session/agents via native mechanisms.
-
-Two async processes:
-  - Reactor: event-driven, consumes from queue, dispatches policies.
-  - Ticker: time-driven, emits TICK events at fixed interval.
-
-Both operate on shared ReactiveState. Policies read state + event,
-produce Decisions. ReactiveSession executes Decisions via SessionHandle.
+Three modes:
+  uv run python scripts/reactive.py              # LiveKit text chat (safe default)
+  uv run python scripts/reactive.py --voice      # LiveKit voice chat (evoice STT/TTS)
+  uv run python scripts/reactive.py --sim        # Event simulator (no LLM)
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import time
-
+import logging
+import sys
 from dataclasses import dataclass, field
-from enum import StrEnum, auto
-from typing import Any, Protocol, Sequence, runtime_checkable
+
+from livekit import agents
+from livekit.agents import Agent, AgentServer, AgentSession, RunContext, cli, function_tool
+from livekit.agents.llm import ChatContext, ChatMessage
+from livekit.plugins import google, silero
+
+from e_agents.arch.models import Event, EventKind, ReactiveState
+from e_agents.arch.policies import AwayPolicy, TaskCompletedPolicy, TurnEscalationPolicy
+from e_agents.arch.protocols import Policy
+from e_agents.arch.session import ReactiveSession
+from e_agents.rtc.adapters.stt.evoice import EVoiceSTT
+from e_agents.rtc.adapters.tts.evoice import EVoiceTTS
+
+logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+
+_VOICE_MODE = False
 
 
-##### ENUMS #####
+##### LOGGING #####
 
 
-class EventKind(StrEnum):
-    """Observable events in the reactive system."""
+_CYAN = "\033[36m"
+_YELLOW = "\033[33m"
+_MAGENTA = "\033[35m"
+_GREEN = "\033[32m"
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
 
-    USER_SPEAKING = auto()
-    USER_SILENT = auto()
-    USER_AWAY = auto()
-    AGENT_SPEAKING = auto()
-    AGENT_IDLE = auto()
-    AGENT_THINKING = auto()
-    TASK_COMPLETED = auto()
-    TASK_FAILED = auto()
-    TICK = auto()
-
-
-class Action(StrEnum):
-    """Executable actions on session/agent."""
-
-    INTERRUPT = auto()
-    REPLY = auto()
-    SAY = auto()
-    UPDATE_INSTRUCTIONS = auto()
-    SWAP_AGENT = auto()
+_TAG_COLORS: dict[str, str] = {
+    "react": _YELLOW,
+    "policy": _MAGENTA,
+    "action": f"{_BOLD}{_GREEN}",
+    "state": _DIM,
+    "agent": _CYAN,
+    "system": _BOLD,
+    "tick": f"{_DIM}{_YELLOW}",
+}
 
 
-##### DATA #####
+def _log(tag: str, msg: str) -> None:
+    color = _TAG_COLORS.get(tag, "")
+    print(f"  {color}[{tag.upper():<8}]{_RESET} {msg}")
 
 
-@dataclass(frozen=True, slots=True)
-class Event:
-    """Immutable event flowing through the reactor."""
-
-    kind: EventKind
-    payload: dict[str, Any] = field(default_factory=dict)
-    timestamp: float = field(default_factory=time.monotonic)
+##### SESSION CONTEXT #####
 
 
-@dataclass(frozen=True, slots=True)
-class Decision:
-    """Action specification produced by a policy."""
+@dataclass
+class SessionContext:
+    """Stored in session.userdata — bridges agent tools to reactive system."""
 
-    action: Action
-    payload: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class ReactiveState:
-    """Shared mutable state — lives in session.userdata."""
-
-    agent_state: str = "idle"
-    user_state: str = "listening"
-    turn_count: int = 0
-    last_user_activity: float = field(default_factory=time.monotonic)
-    data: dict[str, Any] = field(default_factory=dict)
+    state: ReactiveState
+    reactor: ReactiveSession | None = None
+    pending_results: list[str] = field(default_factory=list)
 
 
-##### PROTOCOLS #####
+##### LIVEKIT SESSION HANDLE #####
 
 
-@runtime_checkable
-class SessionHandle(Protocol):
-    """Framework-agnostic session operations.
+class LiveKitSession:
+    """SessionHandle wrapping a real LiveKit AgentSession.
 
-    Each agent framework implements this to bridge native APIs.
-    LiveKit: wraps AgentSession. Console: prints actions.
+    Voice mode: interrupt/say/generate_reply work natively via audio.
+    Text mode: generate_reply output is lost (CLI loop limitation), so we queue
+    instructions in pending_results for turn-boundary injection.
     """
 
-    async def interrupt(self) -> None: ...
-    async def say(self, *, text: str) -> None: ...
-    async def generate_reply(self, *, instructions: str) -> None: ...
-    async def update_instructions(self, *, instructions: str) -> None: ...
-    async def swap_agent(self, *, agent_id: str) -> None: ...
+    __slots__ = ("_session", "_text_mode")
+
+    def __init__(self, session: AgentSession[SessionContext], *, text_mode: bool = False) -> None:
+        self._session = session
+        self._text_mode = text_mode
+
+    async def interrupt(self) -> None:
+        if self._text_mode:
+            _log("action", "interrupt() → skipped (text mode)")
+            return
+        _log("action", "interrupt()")
+        self._session.interrupt()
+
+    async def say(self, *, text: str) -> None:
+        _log("action", f"say({text!r})")
+        if self._text_mode:
+            instructions = f"Di exactamente esto al usuario: {text}"
+            self._session.generate_reply(instructions=instructions)
+            self._session.userdata.pending_results.append(instructions)
+            _log("action", "⚡ queued for next turn (text mode)")
+        else:
+            self._session.say(text, add_to_chat_ctx=True)
+
+    async def generate_reply(self, *, instructions: str) -> None:
+        preview = instructions[:80] + ("..." if len(instructions) > 80 else "")
+        _log("action", f"generate_reply({preview!r})")
+        self._session.generate_reply(instructions=instructions)
+        if self._text_mode:
+            self._session.userdata.pending_results.append(instructions)
+            _log("action", "⚡ queued for next turn (text mode)")
+
+    async def update_instructions(self, *, instructions: str) -> None:
+        _log("action", f"update_instructions({instructions[:50]!r}) (stub)")
+
+    async def swap_agent(self, *, agent_id: str) -> None:
+        _log("action", f"swap_agent({agent_id!r}) (stub)")
 
 
-class Policy(Protocol):
-    """Rule: state + event → decisions (empty tuple = no action)."""
-
-    def evaluate(self, state: ReactiveState, event: Event) -> tuple[Decision, ...]: ...
+##### BACKGROUND TASKS #####
 
 
-##### CONSOLE SESSION #####
+async def _bg_weather(ctx: SessionContext, city: str) -> None:
+    """Simulate weather API — emits TASK_COMPLETED after delay."""
+    _log("agent", f"⏳ bg_weather({city!r}) started — 5s")
+    await asyncio.sleep(5.0)
+    result = f"Clima en {city}: Soleado, 22°C, humedad 45%, viento suave del norte"
+    _log("agent", f"✅ bg_weather({city!r}) done → TASK_COMPLETED")
+    ctx.reactor.emit(Event(
+        kind=EventKind.TASK_COMPLETED,
+        payload={"message": result},
+    ))
+
+
+async def _bg_news(ctx: SessionContext, topic: str) -> None:
+    """Simulate news API — emits TASK_COMPLETED after delay."""
+    _log("agent", f"⏳ bg_news({topic!r}) started — 8s")
+    await asyncio.sleep(8.0)
+    result = (
+        f"Noticias sobre {topic}: "
+        "(1) Gran avance en investigación con IA generativa. "
+        "(2) Nuevo acuerdo comercial entre UE y Mercosur. "
+        "(3) Descubrimiento de exoplaneta habitable a 40 años luz."
+    )
+    _log("agent", f"✅ bg_news({topic!r}) done → TASK_COMPLETED")
+    ctx.reactor.emit(Event(
+        kind=EventKind.TASK_COMPLETED,
+        payload={"message": result},
+    ))
+
+
+##### AGENT #####
+
+
+_ANA_INSTRUCTIONS = """\
+Eres Ana, una asistente amable y directa. Hablas SIEMPRE en español.
+Conversa con naturalidad. Respuestas cortas y claras.
+
+Cuando lances una búsqueda, sigue conversando con el usuario mientras llegan \
+los resultados. No menciones herramientas, sistemas internos ni arquitectura. \
+Habla como una persona normal.
+Cuando recibas resultados (llegarán como instrucciones del sistema), compártelos \
+de forma natural.\
+"""
+
+
+class Ana(Agent):
+    """Simple agent — knows nothing about ReactiveSession."""
+
+    def __init__(self) -> None:
+        super().__init__(instructions=_ANA_INSTRUCTIONS)
+
+    @function_tool()
+    async def check_weather(
+        self, context: RunContext[SessionContext], city: str,
+    ) -> str:
+        """Consulta el clima actual de una ciudad.
+
+        Args:
+            city: Ciudad para consultar el clima.
+        """
+        _log("agent", f"🔧 check_weather({city!r}) → bg task launched")
+        asyncio.create_task(_bg_weather(context.userdata, city))
+        return f"Buscando el clima en {city}. Resultados en unos segundos."
+
+    @function_tool()
+    async def lookup_news(
+        self, context: RunContext[SessionContext], topic: str,
+    ) -> str:
+        """Busca noticias recientes sobre un tema.
+
+        Args:
+            topic: Tema a buscar.
+        """
+        _log("agent", f"🔧 lookup_news({topic!r}) → bg task launched")
+        asyncio.create_task(_bg_news(context.userdata, topic))
+        return f"Buscando noticias sobre {topic}. Resultados en unos segundos."
+
+    async def on_user_turn_completed(
+        self, turn_ctx: ChatContext, new_message: ChatMessage,
+    ) -> None:
+        """Inject pending reactive results into the next LLM turn."""
+        ctx: SessionContext = self.session.userdata
+        if not ctx.pending_results:
+            return
+        for instructions in ctx.pending_results:
+            turn_ctx.add_message(
+                role="system",
+                content=f"[Resultado de tarea en segundo plano] {instructions}",
+            )
+            _log("agent", "📨 pending result injected into turn context")
+        ctx.pending_results.clear()
+
+
+##### SERVER #####
+
+
+server = AgentServer()
+
+
+@server.rtc_session(agent_name="reactive")
+async def entrypoint(ctx: agents.JobContext) -> None:
+    """Wire ReactiveSession + LiveKit agent together."""
+    text_mode = not _VOICE_MODE
+    state = ReactiveState()
+    policies: tuple[Policy, ...] = (
+        TaskCompletedPolicy(),
+        AwayPolicy(timeout=30.0),
+    )
+
+    session_ctx = SessionContext(state=state)
+
+    if text_mode:
+        session = AgentSession[SessionContext](
+            userdata=session_ctx,
+            llm=google.LLM(model="gemini-2.0-flash"),
+            max_tool_steps=5,
+        )
+    else:
+        session = AgentSession[SessionContext](
+            userdata=session_ctx,
+            llm=google.LLM(model="gemini-2.0-flash"),
+            stt=EVoiceSTT(language="es"),
+            tts=EVoiceTTS(),
+            vad=silero.VAD.load(),
+            max_tool_steps=5,
+            allow_interruptions=True,
+            min_endpointing_delay=0.5,
+            max_endpointing_delay=3.0,
+        )
+
+    lk_handle = LiveKitSession(session, text_mode=text_mode)
+    reactor = ReactiveSession(lk_handle, state, policies, tick_interval=2.0, log=_log)
+    session_ctx.reactor = reactor
+
+    asyncio.create_task(reactor.run())
+    await session.start(agent=Ana(), room=ctx.room)
+
+
+##### CONSOLE SIMULATOR #####
 
 
 class ConsoleSession:
-    """SessionHandle for console testing — prints executed actions."""
-
-    @staticmethod
-    def _log(msg: str) -> None:
-        print(f"  [ACTION ] {msg}")
+    """SessionHandle for the event simulator — prints actions."""
 
     async def interrupt(self) -> None:
-        self._log("interrupt()")
+        _log("action", "interrupt()")
 
     async def say(self, *, text: str) -> None:
-        self._log(f"say({text!r})")
+        _log("action", f"say({text!r})")
 
     async def generate_reply(self, *, instructions: str) -> None:
-        self._log(f"generate_reply(instructions={instructions!r})")
+        _log("action", f"generate_reply(instructions={instructions!r})")
 
     async def update_instructions(self, *, instructions: str) -> None:
-        self._log(f"update_instructions({instructions!r})")
+        _log("action", f"update_instructions({instructions!r})")
 
     async def swap_agent(self, *, agent_id: str) -> None:
-        self._log(f"swap_agent({agent_id!r})")
-
-
-##### REACTIVE SESSION #####
-
-
-class ReactiveSession:
-    """Async state machine: observe events, evaluate policies, act on session."""
-
-    def __init__(
-        self,
-        session: SessionHandle,
-        state: ReactiveState,
-        policies: Sequence[Policy],
-        *,
-        tick_interval: float = 1.0,
-    ) -> None:
-        self._session = session
-        self._state = state
-        self._policies = tuple(policies)
-        self._tick_interval = tick_interval
-        self._queue: asyncio.Queue[Event] = asyncio.Queue()
-        self._running = False
-        self._stop_event: asyncio.Event | None = None
-
-    @property
-    def state(self) -> ReactiveState:
-        """Current reactive state (read-only access)."""
-        return self._state
-
-    def emit(self, event: Event) -> None:
-        """Push event into reactor queue."""
-        self._queue.put_nowait(event)
-
-    async def run(self) -> None:
-        """Start reactor + ticker. Blocks until stop()."""
-        self._running = True
-        self._stop_event = asyncio.Event()
-        self._rs_log("SYSTEM", f"started (tick={self._tick_interval}s, policies={len(self._policies)})")
-        self._rs_log("STATE", self._rs_format_state())
-
-        reactor = asyncio.create_task(self._rs_reactor_loop())
-        ticker = asyncio.create_task(self._rs_ticker_loop())
-
-        await self._stop_event.wait()
-
-        reactor.cancel()
-        ticker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(reactor, ticker)
-
-        self._rs_log("SYSTEM", "stopped")
-
-    def stop(self) -> None:
-        """Signal shutdown."""
-        self._running = False
-        if self._stop_event is not None:
-            self._stop_event.set()
-
-    # ── Private: loops ──
-
-    async def _rs_reactor_loop(self) -> None:
-        """Consume events from queue, dispatch policies."""
-        while self._running:
-            event = await self._queue.get()
-            if not self._running:
-                break
-            await self._rs_dispatch(event)
-
-    async def _rs_ticker_loop(self) -> None:
-        """Emit TICK events at fixed interval."""
-        while self._running:
-            await asyncio.sleep(self._tick_interval)
-            if self._running:
-                self.emit(Event(kind=EventKind.TICK))
-
-    # ── Private: dispatch ──
-
-    async def _rs_dispatch(self, event: Event) -> None:
-        """Apply event → update state → evaluate policies → act."""
-        self._rs_apply(event)
-        is_tick = event.kind == EventKind.TICK
-
-        if not is_tick:
-            payload_str = f" {event.payload}" if event.payload else ""
-            self._rs_log("EVENT", f"{event.kind.value}{payload_str}")
-            self._rs_log("STATE", self._rs_format_state())
-
-        for policy in self._policies:
-            decisions = policy.evaluate(self._state, event)
-            if not decisions:
-                continue
-            name = type(policy).__name__
-            if is_tick:
-                self._rs_log("TICK", f"{name} triggered")
-            self._rs_log("POLICY", f"{name} -> {len(decisions)} decision(s)")
-            for decision in decisions:
-                await self._rs_act(decision)
-
-    def _rs_apply(self, event: Event) -> None:
-        """Update state from event (observation step)."""
-        match event.kind:
-            case EventKind.USER_SPEAKING:
-                self._state.user_state = "speaking"
-                self._state.last_user_activity = event.timestamp
-            case EventKind.USER_SILENT:
-                if self._state.user_state == "speaking":
-                    self._state.turn_count += 1
-                self._state.user_state = "listening"
-                self._state.last_user_activity = event.timestamp
-            case EventKind.USER_AWAY:
-                self._state.user_state = "away"
-            case EventKind.AGENT_SPEAKING:
-                self._state.agent_state = "speaking"
-            case EventKind.AGENT_IDLE:
-                self._state.agent_state = "idle"
-            case EventKind.AGENT_THINKING:
-                self._state.agent_state = "thinking"
-            case EventKind.TASK_COMPLETED | EventKind.TASK_FAILED:
-                self._state.data.update(event.payload)
-
-    async def _rs_act(self, decision: Decision) -> None:
-        """Execute a decision via session handle."""
-        p = decision.payload
-        match decision.action:
-            case Action.INTERRUPT:
-                await self._session.interrupt()
-            case Action.REPLY:
-                await self._session.generate_reply(instructions=p.get("instructions", ""))
-            case Action.SAY:
-                await self._session.say(text=p.get("text", ""))
-            case Action.UPDATE_INSTRUCTIONS:
-                await self._session.update_instructions(instructions=p.get("instructions", ""))
-            case Action.SWAP_AGENT:
-                await self._session.swap_agent(agent_id=p.get("agent_id", ""))
-
-    # ── Private: formatting ──
-
-    def _rs_format_state(self) -> str:
-        """Format state for log output."""
-        s = self._state
-        parts = [f"user={s.user_state}", f"agent={s.agent_state}", f"turns={s.turn_count}"]
-        if s.data:
-            parts.append(f"data={s.data}")
-        return " ".join(parts)
-
-    @staticmethod
-    def _rs_log(tag: str, msg: str) -> None:
-        print(f"  [{tag:<8}] {msg}")
-
-
-##### EXAMPLE POLICIES #####
-
-
-class AwayPolicy:
-    """If user silent too long on TICK, prompt them."""
-
-    def __init__(self, timeout: float = 10.0) -> None:
-        self._timeout = timeout
-        self._notified = False
-
-    def evaluate(self, state: ReactiveState, event: Event) -> tuple[Decision, ...]:
-        if event.kind == EventKind.USER_SPEAKING:
-            self._notified = False
-            return ()
-
-        if event.kind != EventKind.TICK:
-            return ()
-
-        elapsed = event.timestamp - state.last_user_activity
-        if elapsed > self._timeout and not self._notified:
-            self._notified = True
-            return (Decision(action=Action.SAY, payload={"text": "Are you still there?"}),)
-
-        return ()
-
-
-class TaskCompletedPolicy:
-    """On task completion/failure, interrupt and share results."""
-
-    def evaluate(self, state: ReactiveState, event: Event) -> tuple[Decision, ...]:
-        match event.kind:
-            case EventKind.TASK_COMPLETED:
-                msg = event.payload.get("message", "Task completed.")
-                return (
-                    Decision(action=Action.INTERRUPT),
-                    Decision(
-                        action=Action.REPLY,
-                        payload={"instructions": f"Share this result with the user: {msg}"},
-                    ),
-                )
-            case EventKind.TASK_FAILED:
-                error = event.payload.get("error", "Unknown error.")
-                return (
-                    Decision(
-                        action=Action.REPLY,
-                        payload={"instructions": f"A background task failed: {error}. Inform the user."},
-                    ),
-                )
-            case _:
-                return ()
-
-
-class TurnEscalationPolicy:
-    """After N turns without resolution, swap to a more capable agent."""
-
-    def __init__(self, threshold: int = 5, target_agent: str = "escalation") -> None:
-        self._threshold = threshold
-        self._target = target_agent
-        self._escalated = False
-
-    def evaluate(self, state: ReactiveState, event: Event) -> tuple[Decision, ...]:
-        if self._escalated or event.kind != EventKind.USER_SILENT:
-            return ()
-
-        if state.turn_count >= self._threshold:
-            self._escalated = True
-            return (
-                Decision(
-                    action=Action.UPDATE_INSTRUCTIONS,
-                    payload={"instructions": "The conversation is taking too long. Wrap up or escalate."},
-                ),
-                Decision(action=Action.SWAP_AGENT, payload={"agent_id": self._target}),
-            )
-
-        return ()
-
-
-##### CONSOLE RUNNER #####
+        _log("action", f"swap_agent({agent_id!r})")
 
 
 _HELP: dict[str, str] = {
@@ -372,14 +294,11 @@ _HELP: dict[str, str] = {
 
 
 def _parse_input(line: str) -> Event | str | None:
-    """Parse console input into Event, command string, or None."""
     parts = line.strip().split(maxsplit=1)
     if not parts:
         return None
-
     cmd = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
-
     match cmd:
         case "speak":
             return Event(kind=EventKind.USER_SPEAKING)
@@ -400,7 +319,7 @@ def _parse_input(line: str) -> Event | str | None:
 
 
 async def run_console(*, tick_interval: float = 2.0, away_timeout: float = 10.0) -> None:
-    """Interactive console for testing the reactive session."""
+    """Interactive event simulator (no LLM — manual event injection)."""
     state = ReactiveState()
     session = ConsoleSession()
     policies: tuple[Policy, ...] = (
@@ -414,11 +333,11 @@ async def run_console(*, tick_interval: float = 2.0, away_timeout: float = 10.0)
         state=state,
         policies=policies,
         tick_interval=tick_interval,
+        log=_log,
     )
 
     task = asyncio.create_task(reactive.run())
-
-    print("\n  ReactiveSession Console — type 'help' for commands\n")
+    print("\n  ReactiveSession Simulator — type 'help' for commands\n")
 
     try:
         while True:
@@ -429,20 +348,16 @@ async def run_console(*, tick_interval: float = 2.0, away_timeout: float = 10.0)
                 case Event() as event:
                     reactive.emit(event)
                     await asyncio.sleep(0.05)
-
                 case "state":
                     s = reactive.state
                     print(f"  user={s.user_state} agent={s.agent_state} turns={s.turn_count}")
                     print(f"  last_activity={s.last_user_activity:.1f}")
                     print(f"  data={s.data}")
-
                 case "help":
                     for cmd, desc in _HELP.items():
                         print(f"  {cmd:<16} {desc}")
-
                 case "quit":
                     break
-
                 case str(s) if s.startswith("set:"):
                     kv = s[4:].split(maxsplit=1)
                     if len(kv) == 2:
@@ -450,17 +365,26 @@ async def run_console(*, tick_interval: float = 2.0, away_timeout: float = 10.0)
                         print(f"  state.data[{kv[0]!r}] = {kv[1]!r}")
                     else:
                         print("  Usage: set <key> <value>")
-
                 case _:
                     print("  Unknown command. Type 'help'.")
 
     except (EOFError, KeyboardInterrupt):
         print()
-
     finally:
         reactive.stop()
         await task
 
 
+##### MAIN #####
+
+
 if __name__ == "__main__":
-    asyncio.run(run_console())
+    if "--sim" in sys.argv:
+        asyncio.run(run_console())
+    elif "--voice" in sys.argv:
+        _VOICE_MODE = True
+        sys.argv = [sys.argv[0], "console"]
+        cli.run_app(server)
+    else:
+        sys.argv = [sys.argv[0], "console", "--text"]
+        cli.run_app(server)
