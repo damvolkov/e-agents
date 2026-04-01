@@ -1,13 +1,17 @@
-"""Streaming STT adapter for e-voice via WebSocket + HTTP batch."""
+"""Streaming STT adapter for e-voice via WebSocket + HTTP batch.
+
+Protocol (e-voice WS):
+  Audio:    PCM16-LE, 16kHz, mono, binary frames, ~200ms chunks
+  End:      text "END_OF_AUDIO" for final flush
+  Response: {"type": "transcript_update|transcript_final|session_end",
+             "text": "confirmed", "partial": "provisional", "is_final": bool}
+"""
 
 import asyncio
-import base64
 import contextlib
 import io
 import logging
-import re
 import struct
-import time as _time
 
 import httpx
 import orjson as json
@@ -23,53 +27,8 @@ _log = logging.getLogger("e_agents.stt.evoice")
 
 _WS_CLOSE_TIMEOUT = 5
 _WS_DRAIN_TIMEOUT = 5
-_ECHO_GATE_DURATION = 1.5
-
-##### WHISPER PHANTOM FILTER #####
-
-_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
-
-_WHISPER_PHANTOMS: frozenset[str] = frozenset({
-    "gracias",
-    "gracias por ver",
-    "gracias por ver el video",
-    "suscribete",
-    "suscribete al canal",
-    "me gusta",
-    "subtitulos realizados por la comunidad de amara org",
-    "subtitulos por la comunidad de amara org",
-    "thank you",
-    "thanks",
-    "thank you for watching",
-    "thanks for watching",
-    "subscribe",
-    "like and subscribe",
-    "you",
-})
-
-
-def _is_whisper_phantom(text: str) -> bool:
-    """Detect known Whisper hallucinations (exact match only, not substring)."""
-    normalized = _PUNCT_RE.sub("", text.strip().lower()).strip()
-    return normalized in _WHISPER_PHANTOMS
-
-
-##### ECHO / SPEAKING-STATE SUPPRESSION #####
-
-_echo_gate_until: float = 0.0
-_agent_speaking: bool = False
-
-
-def set_agent_speaking(speaking: bool) -> None:
-    """Gate STT output while agent speaks, plus post-speech cooldown."""
-    global _agent_speaking, _echo_gate_until  # noqa: PLW0603
-    _agent_speaking = speaking
-    if not speaking:
-        _echo_gate_until = _time.monotonic() + _ECHO_GATE_DURATION
-
-
-def _is_echo_suppressed() -> bool:
-    return _agent_speaking or _time.monotonic() < _echo_gate_until
+_EVOICE_SAMPLE_RATE = 16000
+_CHUNK_BYTES = 6400  # ~200ms at 16kHz mono PCM16 (16000 * 2 * 0.2)
 
 
 ##### AUDIO HELPERS #####
@@ -192,11 +151,11 @@ class EVoiceSTT(stt.STT):
 
 
 class EVoiceStream(stt.RecognizeStream):
-    """Streaming recognition via e-voice WebSocket with LocalAgreement.
+    """Single persistent WS for the stream lifetime.
 
-    Connects to /v1/stt/ws?model=<m>&language=<l>&response_format=json.
-    Client sends base64-encoded PCM16 audio chunks (16kHz mono) as text frames.
-    Server responds with typed events: transcript_update, transcript_final, session_end.
+    e-voice accumulates text across the session. Each progressive confirmation
+    emits FINAL_TRANSCRIPT with the full accumulated text so the agent pipeline
+    always has complete context via preemptive_generation.
     """
 
     def __init__(
@@ -208,7 +167,11 @@ class EVoiceStream(stt.RecognizeStream):
         model: str,
         conn_options: APIConnectOptions,
     ) -> None:
-        super().__init__(stt=stt_instance, conn_options=conn_options)
+        super().__init__(
+            stt=stt_instance,
+            conn_options=conn_options,
+            sample_rate=_EVOICE_SAMPLE_RATE,
+        )
         self._base_url = base_url
         self._language = language
         self._model = model
@@ -223,7 +186,7 @@ class EVoiceStream(stt.RecognizeStream):
 
         try:
             async with websockets.connect(ws_url, close_timeout=_WS_CLOSE_TIMEOUT) as ws:
-                _log.debug("STREAM_OPEN lang=%s model=%s", self._language, self._model)
+                _log.debug("STREAM_OPEN lang=%s model=%s sr=%d", self._language, self._model, _EVOICE_SAMPLE_RATE)
 
                 forward_task = asyncio.create_task(self._ev_forward(ws), name="ev_forward")
                 receive_task = asyncio.create_task(self._ev_receive(ws), name="ev_receive")
@@ -239,19 +202,29 @@ class EVoiceStream(stt.RecognizeStream):
         _log.debug("STREAM_DONE")
 
     async def _ev_forward(self, ws: websockets.ClientConnection) -> None:
-        """Forward audio frames as base64-encoded PCM16 text frames."""
+        """Buffer audio frames into ~200ms chunks and send as binary."""
+        buf = bytearray()
+        first = True
         async for frame in self._input_ch:
             if isinstance(frame, self._FlushSentinel):
                 continue
+            if first:
+                _log.debug("AUDIO_FMT sr=%d ch=%d", frame.sample_rate, frame.num_channels)
+                first = False
+            buf.extend(frame.data)
+            if len(buf) >= _CHUNK_BYTES:
+                with contextlib.suppress(Exception):
+                    await ws.send(bytes(buf))
+                buf.clear()
+        if buf:
             with contextlib.suppress(Exception):
-                encoded = base64.b64encode(bytes(frame.data)).decode("ascii")
-                await ws.send(encoded)
+                await ws.send(bytes(buf))
         with contextlib.suppress(Exception):
             await ws.send("END_OF_AUDIO")
 
     async def _ev_receive(self, ws: websockets.ClientConnection) -> None:
-        """Receive e-voice events and emit transcript updates."""
-        committed_len = 0
+        """Emit FINAL_TRANSCRIPT with full accumulated text on each confirmation."""
+        full_text = ""
         speech_started = False
 
         try:
@@ -268,39 +241,25 @@ class EVoiceStream(stt.RecognizeStream):
                     continue
 
                 event_type = data.get("type", "")
-                cumulative_text = data.get("text", "").strip()
+                confirmed = data.get("text", "").strip()
+                is_final = data.get("is_final", False)
 
-                if not cumulative_text:
-                    continue
+                if confirmed and confirmed != full_text:
+                    full_text = confirmed
 
-                new_text = cumulative_text[committed_len:].strip()
-                if not new_text:
-                    continue
+                    if not speech_started:
+                        speech_started = True
+                        self._event_ch.send_nowait(
+                            stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
+                        )
 
-                if _is_echo_suppressed():
-                    _log.debug("ECHO_SUPPRESSED text=%r", new_text)
-                    committed_len = len(cumulative_text)
-                    continue
+                    self._event_ch.send_nowait(stt.SpeechEvent(
+                        type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                        alternatives=[stt.SpeechData(language=self._language, text=full_text)],
+                    ))
+                    _log.debug("FINAL text=%r", full_text)
 
-                if _is_whisper_phantom(cumulative_text):
-                    _log.debug("PHANTOM_FILTERED text=%r", cumulative_text)
-                    committed_len = len(cumulative_text)
-                    continue
-
-                if not speech_started:
-                    speech_started = True
-                    self._event_ch.send_nowait(
-                        stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
-                    )
-
-                self._event_ch.send_nowait(stt.SpeechEvent(
-                    type=stt.SpeechEventType.FINAL_TRANSCRIPT,
-                    alternatives=[stt.SpeechData(language=self._language, text=new_text)],
-                ))
-                committed_len = len(cumulative_text)
-                _log.debug("FINAL type=%s text=%r", event_type, new_text)
-
-                if event_type == "session_end":
+                if event_type == "session_end" or is_final:
                     break
 
         except websockets.exceptions.ConnectionClosed:

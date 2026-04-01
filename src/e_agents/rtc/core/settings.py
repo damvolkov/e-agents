@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from enum import StrEnum, auto
+from pathlib import Path
+from typing import ClassVar
+
+import os
 
 from pydantic import AnyHttpUrl, AnyUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings
+
+_BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 ##### ENUMS #####
 
@@ -73,9 +79,21 @@ class RTCSettings(BaseSettings):
     MCP_API_TOKEN: SecretStr = ""
     MCP_PROJECT_ID: str = ""
 
+    # Model paths
+    DATA_PATH: ClassVar[Path] = _BASE_DIR / "data"
+    MODELS_PATH: ClassVar[Path] = DATA_PATH / "models"
+    VAD_MODEL_PATH: ClassVar[Path] = MODELS_PATH / "vad" / "silero_vad.onnx"
+    TURN_MODEL_CACHE: ClassVar[Path] = MODELS_PATH / "turn"
+
+    def model_post_init(self, __context: object) -> None:
+        os.environ.setdefault("HF_HUB_CACHE", str(self.TURN_MODEL_CACHE))
+
     # VAD (Silero)
     VAD_SAMPLE_RATE: int = 16000
     VAD_ACTIVATION_THRESHOLD: float = 0.6
     VAD_MIN_SPEECH_DURATION: float = 0.15
     VAD_MIN_SILENCE_DURATION: float = 0.8
     VAD_PREFIX_PADDING_DURATION: float = 0.4
+
+    # Turn Detector (MultilingualModel)
+    TURN_DETECTOR_MODEL: str = "multilingual"

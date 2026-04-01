@@ -32,7 +32,7 @@ COMPOSE_FILE := compose.yml
 
 .PHONY: help install sync lock lint format type test test-integration \
         infra infra-down build logs \
-        run console join token stt script clean
+        run console join token stt script download clean
 
 # -----------------------------------------------------------------------------
 # Help
@@ -101,6 +101,11 @@ sync:
 	@echo "$(GREEN)=== Syncing dependencies ===$(RESET)"
 	@uv sync --dev
 	@echo "$(GREEN)=== Sync complete ===$(RESET)"
+
+download:
+	@echo "$(GREEN)=== Downloading models to data/models/ ===$(RESET)"
+	@uv run python scripts/download_models.py
+	@echo "$(GREEN)=== Download complete ===$(RESET)"
 
 lock:
 	@echo "$(GREEN)=== Updating lockfile ===$(RESET)"

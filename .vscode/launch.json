@@ -28,6 +28,18 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "script prototype",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/prototype.py",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
             "name": "script simple",
             "type": "debugpy",
             "request": "launch",

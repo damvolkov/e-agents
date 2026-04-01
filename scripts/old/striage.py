@@ -13,7 +13,7 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from enum import IntEnum, StrEnum, auto
-from typing import Any, Self
+from typing import Any
 from uuid import uuid4
 
 from livekit import agents

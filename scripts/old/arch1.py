@@ -23,7 +23,9 @@ from livekit.agents import (
     cli,
     function_tool,
 )
-from livekit.plugins import google, openai
+from livekit.plugins import google
+
+from e_agents.arch.livekit import LiveKitReactiveAgent
 from e_agents.arch.models import (
     Event,
     EventEffect,
@@ -33,10 +35,7 @@ from e_agents.arch.models import (
     TaskConfig,
     TaskStatus,
 )
-
-from e_agents.shared.core.settings import settings as st
 from e_agents.arch.state import ReactiveState
-from e_agents.arch.livekit import LiveKitReactiveAgent
 
 logger = logging.getLogger("rtc.agents.duo")
 

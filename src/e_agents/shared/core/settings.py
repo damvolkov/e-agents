@@ -55,9 +55,6 @@ class Settings(RTCSettings, APISettings, CLISettings):
     DEFAULT_SESSION: str = "web"
 
     TOOLS_DIR: ClassVar[Path] = BASE_DIR / "src" / "e_agents" / "rtc" / "tools"
-    DATA_PATH: ClassVar[Path] = BASE_DIR / "data"
-    MODELS_PATH: ClassVar[Path] = DATA_PATH / "models"
-
     ##### LANGUAGE #####
 
     USER_LANGUAGE: str = "es"

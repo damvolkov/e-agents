@@ -14,18 +14,22 @@ from e_agents.arch.models import Action, Decision, Event, EventKind, ReactiveSta
 
 
 class AwayPolicy:
-    """If user silent too long on TICK, prompt them."""
+    """If no activity (user or agent) for too long on TICK, prompt them."""
 
     def __init__(self, timeout: float = 10.0) -> None:
         self._timeout = timeout
         self._notified = False
 
     def evaluate(self, state: ReactiveState, event: Event) -> tuple[Decision, ...]:
-        if event.kind == EventKind.USER_SPEAKING:
-            self._notified = False
-            return ()
+        # Any real activity resets the timer
+        match event.kind:
+            case EventKind.USER_SPEAKING | EventKind.AGENT_SPEAKING | EventKind.TASK_COMPLETED:
+                self._notified = False
+                return ()
+
         if event.kind != EventKind.TICK:
             return ()
+
         elapsed = event.timestamp - state.last_user_activity
         if elapsed > self._timeout and not self._notified:
             self._notified = True
@@ -34,11 +38,22 @@ class AwayPolicy:
 
 
 class TaskCompletedPolicy:
-    """On task completion/failure, interrupt and share results."""
+    """On task completion/failure, interrupt and share results.
+
+    Cooldown prevents infinite loops: if the LLM re-triggers the same tool
+    after receiving results, duplicate TASK_COMPLETEDs are ignored.
+    """
+
+    def __init__(self, cooldown: float = 5.0) -> None:
+        self._cooldown = cooldown
+        self._last_handled: float = 0.0
 
     def evaluate(self, state: ReactiveState, event: Event) -> tuple[Decision, ...]:
         match event.kind:
             case EventKind.TASK_COMPLETED:
+                if event.timestamp - self._last_handled < self._cooldown:
+                    return ()
+                self._last_handled = event.timestamp
                 msg = event.payload.get("message", "Tarea completada.")
                 return (
                     Decision(action=Action.INTERRUPT),
@@ -53,6 +68,9 @@ class TaskCompletedPolicy:
                     ),
                 )
             case EventKind.TASK_FAILED:
+                if event.timestamp - self._last_handled < self._cooldown:
+                    return ()
+                self._last_handled = event.timestamp
                 error = event.payload.get("error", "Error desconocido.")
                 return (
                     Decision(

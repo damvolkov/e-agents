@@ -8,7 +8,6 @@ import httpx
 from livekit.agents import RunContext, function_tool
 from livekit.agents.llm import ToolError
 
-from e_agents.rtc.models.state import SessionState
 from e_agents.shared.adapters.searxng import SearXNGAdapter
 from e_agents.shared.models import SearchCategory, SearchResponse
 
@@ -43,7 +42,7 @@ def _format_results(query: str, category: str, results: list[SearchResponse], ma
 
 @function_tool()
 async def web_search(
-    context: RunContext[SessionState],
+    context: RunContext,
     query: str,
     category: SearchCategory = SearchCategory.GENERAL,
     max_results: int = 5,
@@ -61,9 +60,8 @@ async def web_search(
     clamped = max(1, min(max_results, 20))
     logger.info("🔍 SEARCH query=%r category=%r max_results=%d", query, category, clamped, extra={"tags": "TOOL"})
 
-    searxng: SearXNGAdapter = context.userdata.get_adapter("searxng")  # type: ignore[assignment]
     try:
-        results = await searxng.query(query, category=category, max_results=clamped)
+        results = await SearXNGAdapter.query(query, category=category, max_results=clamped)
     except httpx.HTTPStatusError as exc:
         raise ToolError(
             f"Search failed: HTTP {exc.response.status_code}. Try again later."

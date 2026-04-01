@@ -138,12 +138,14 @@ class ReactiveSession:
                 self._state.user_state = "away"
             case EventKind.AGENT_SPEAKING:
                 self._state.agent_state = "speaking"
+                self._state.last_user_activity = event.timestamp
             case EventKind.AGENT_IDLE:
                 self._state.agent_state = "idle"
             case EventKind.AGENT_THINKING:
                 self._state.agent_state = "thinking"
             case EventKind.TASK_COMPLETED | EventKind.TASK_FAILED:
                 self._state.data.update(event.payload)
+                self._state.last_user_activity = event.timestamp
 
     async def _rs_act(self, decision: Decision) -> None:
         """Execute a decision via session handle."""
@@ -151,6 +153,7 @@ class ReactiveSession:
         match decision.action:
             case Action.INTERRUPT:
                 await self._session.interrupt()
+                await asyncio.sleep(0.15)
             case Action.REPLY:
                 await self._session.generate_reply(
                     instructions=p.get("instructions", ""),

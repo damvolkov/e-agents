@@ -9,8 +9,6 @@ import trafilatura
 from livekit.agents import RunContext, function_tool
 from livekit.agents.llm import ToolError
 
-from e_agents.rtc.models.state import SessionState
-
 logging.getLogger("trafilatura").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
@@ -38,7 +36,7 @@ def _extract_content(html: str, *, max_length: int) -> str:
 
 @function_tool()
 async def web_fetch(
-    context: RunContext[SessionState],
+    context: RunContext,
     url: str,
     max_length: int = _DEFAULT_MAX_LENGTH,
 ) -> str:
