@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="e-agents" width="240">
   <h1>e-agents</h1>
+  <img src="assets/logo.svg" alt="e-agents" height="110">
   <p><strong>Template for building multi-agent voice AI systems with LiveKit</strong></p>
   <p>Double-loop architecture with background tasks, agent handoffs, and real-time tracing.</p>
   <p>
